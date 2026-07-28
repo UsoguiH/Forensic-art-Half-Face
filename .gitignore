@@ -31,3 +31,6 @@ gallery_thumbs/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local cleanup staging (never commit)
+_to_delete/

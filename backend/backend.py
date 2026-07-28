@@ -26,12 +26,7 @@ import identity_studio as studio
 import enroll as enroll_mod
 from face_store import FaceStore
 
-if os.environ.get("FACELAB_REMOTE_API", "").strip():
-    from remote_engine import RemoteEngine
-
-    ENGINE = RemoteEngine()
-else:
-    ENGINE = studio.ENGINE
+ENGINE = studio.ENGINE
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = Path(os.environ.get("FACELAB_STATIC_DIR", BASE_DIR.parent / "static")).resolve()
 INDEX_DIR = Path(os.environ.get("FACELAB_INDEX_DIR", BASE_DIR.parent / "data")).resolve()

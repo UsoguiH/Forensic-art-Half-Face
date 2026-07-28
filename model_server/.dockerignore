@@ -1,8 +1,0 @@
-__MACOSX/
-*.md
-.env
-.env.example
-test_app.py
-models/
-__pycache__/
-*.pyc
