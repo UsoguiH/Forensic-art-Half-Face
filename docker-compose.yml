@@ -1,0 +1,90 @@
+# facelab stack: model-server (FLUX.2, GPU) + facelab (UI/search, GPU) + Qdrant + MinIO
+#
+#   1) cp .env.example .env   and fill in the values
+#   2) docker compose up -d --build
+#   3) open http://<host>:8010
+#
+# ./data must contain the prebuilt index: front.index, front_ids.npy, front_paths.json
+services:
+  model-server:
+    build: ./model_server
+    image: facelab-model-server:latest
+    environment:
+      AUTO_DOWNLOAD_MODELS: ${AUTO_DOWNLOAD_MODELS:-true}
+      KLEIN_ENCODER: ${KLEIN_ENCODER:-4bit}
+      MODEL_IDLE_SECONDS: ${MODEL_IDLE_SECONDS:-900}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /hf
+      MODEL_DIR: /models
+    volumes:
+      - model_cache:/models
+      - hf_cache:/hf
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-facelab}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-change_me_please}
+    ports:
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  facelab:
+    build: .
+    image: facelab:latest
+    depends_on: [model-server, qdrant, minio]
+    ports:
+      - "8010:8010"
+    environment:
+      FACELAB_REMOTE_API: ${FACELAB_REMOTE_API:-http://model-server:8000}
+      FACELAB_REMOTE_MODEL: ${FACELAB_REMOTE_MODEL:-klein}
+      FACELAB_INDEX_DIR: /data
+      FACELAB_STATIC_DIR: /app/static
+      FACELAB_DATASET_ROOT: ${FACELAB_DATASET_ROOT:-/data/mugshots}
+      KAGGLE_USERNAME: ${KAGGLE_USERNAME:-}
+      KAGGLE_KEY: ${KAGGLE_KEY:-}
+      FACELAB_KAGGLE_SLUG: ${FACELAB_KAGGLE_SLUG:-elliotp/idoc-mugshots}
+      FACELAB_QDRANT_URL: http://qdrant:6333
+      FACELAB_MINIO_ENDPOINT: minio:9000
+      FACELAB_MINIO_ACCESS_KEY: ${MINIO_USER:-facelab}
+      FACELAB_MINIO_SECRET_KEY: ${MINIO_PASSWORD:-change_me_please}
+      FACELAB_MINIO_BUCKET: facelab
+      FACELAB_FAST: "1"
+      FACELAB_QUERY_N: "30"
+      FACELAB_CPU_OFFLOAD: "0"
+      HF_HOME: /hf
+    volumes:
+      - ./data:/data
+      - hf_cache:/hf
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  qdrant_data: {}
+  minio_data: {}
+  hf_cache: {}
+  model_cache: {}

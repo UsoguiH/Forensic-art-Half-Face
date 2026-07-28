@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>الرسام الجنائي — Forensic Sketch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#000; --panel:#070709; --panel2:#050506; --line:#191a20;
+  --ink:#f2f4fb; --muted:#818aa0; --dim:#4a5162;
+  --core:#8b5cf6; --core2:#a78bfa;
+  --a1:#25e0f5; --a2:#f5a524; --red:#ff3b52; --good:#34d399; --warn:#fbbf24;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#000;color:var(--ink);
+  font:15px/1.7 "Tajawal",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Tahoma,Arial}
+.wrap{height:100dvh;max-width:1560px;margin:0 auto;padding:10px 20px 12px;display:flex;flex-direction:column}
+.topbar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:14px;position:relative;z-index:5}
+.brand{display:flex;align-items:center;gap:11px}
+.logo{width:30px;height:30px;border-radius:50%;
+  background:radial-gradient(circle at 38% 32%,#c4b5fd,#7c3aed 55%,#1a1030 100%);
+  box-shadow:0 0 22px #7c3aed99}
+.brand h1{font-size:19px;font-weight:900;margin:0}
+.brand .tag{color:var(--muted);font-size:10.5px;margin-top:-2px}
+.api{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.api #hstate{max-width:270px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.engSwitch{display:flex;gap:0;background:#08080b;border:1px solid var(--line);border-radius:999px;padding:3px}
+.engSwitch button{background:transparent;border:0;color:var(--muted);font:inherit;font-weight:800;font-size:11px;
+  padding:5px 13px;border-radius:999px;cursor:pointer;transition:.2s;white-space:nowrap}
+.engSwitch button.on{color:#fff;background:linear-gradient(180deg,#3d3f49,#25262e);box-shadow:0 0 12px #6b72801f}
+.api input{background:#0a0a0d;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:6px 9px;font-size:12px;width:180px;direction:ltr;text-align:left;font-family:inherit}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--warn);box-shadow:0 0 10px currentColor}
+.dot.on{background:var(--good)}
+.btn{border:0;color:#fff;font-weight:800;padding:10px 16px;border-radius:11px;cursor:pointer;font:inherit;font-size:14px;transition:.15s}
+.btn:hover{filter:brightness(1.16);transform:translateY(-1px)} .btn:active{transform:none}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:#0d0d12;color:#cdd6ea;border:1px solid var(--line)}
+.btn.a1{background:linear-gradient(180deg,#0b8ea3,#075e6d)}
+.btn.a2{background:linear-gradient(180deg,#c2740b,#8a5207)}
+
+/* ============ MAIN: orb column on the LEFT, panel on the RIGHT ============ */
+.main{flex:1 1 auto;display:grid;grid-template-columns:430px minmax(0,1fr);gap:20px;
+  min-height:0;margin-top:6px;direction:ltr}
+.stageCol{direction:rtl;position:relative;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;min-height:0;overflow:visible}
+#fx{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+.panelCol{direction:rtl;min-height:0;overflow-y:auto;overflow-x:hidden;padding:2px 2px 14px;scrollbar-width:thin;scrollbar-color:#22242e #000}
+.panelCol::-webkit-scrollbar{width:9px}
+.panelCol::-webkit-scrollbar-thumb{background:#1c1e27;border-radius:6px}
+
+.modeSwitch{position:relative;z-index:4;display:flex;gap:0;background:#08080b;border:1px solid var(--line);
+  border-radius:999px;padding:4px;margin-bottom:12px}
+.modeSwitch button{background:transparent;border:0;color:var(--muted);font:inherit;font-weight:800;font-size:13.5px;
+  padding:8px 22px;border-radius:999px;cursor:pointer;transition:.2s}
+.modeSwitch button.on{color:#fff}
+.modeSwitch button.on[data-m=search]{background:linear-gradient(180deg,#0b8ea3,#075e6d);box-shadow:0 0 18px #22d3ee44}
+.modeSwitch button.on[data-m=studio]{background:linear-gradient(180deg,#c2740b,#8a5207);box-shadow:0 0 18px #f59e0b44}
+
+.orbWrap{position:relative;z-index:3;width:330px;height:330px;display:grid;place-items:center}
+.orbGlow{position:absolute;width:440px;height:440px;border-radius:50%;z-index:0;pointer-events:none;transition:.5s;
+  background:radial-gradient(circle, rgba(37,224,245,.26) 0%, rgba(37,224,245,.09) 32%, rgba(0,0,0,0) 68%)}
+.orbGlow.studio{background:radial-gradient(circle, rgba(245,165,36,.24) 0%, rgba(245,165,36,.09) 32%, rgba(0,0,0,0) 68%)}
+.orbGlow.flare{width:540px;height:540px;background:radial-gradient(circle, rgba(139,92,246,.5) 0%, rgba(139,92,246,.15) 34%, rgba(0,0,0,0) 70%)}
+.orb{position:absolute;width:280px;height:280px;border-radius:50%;overflow:hidden;z-index:1;
+  box-shadow:inset 0 0 60px rgba(0,0,0,.6), 0 0 0 1px rgba(150,130,210,.12)}
+#orbFace{position:absolute;inset:0;width:100%;height:100%}
+#selOverlay{position:absolute;inset:0;width:100%;height:100%;z-index:6;pointer-events:none}
+.sphere{position:absolute;inset:0;border-radius:50%;pointer-events:none;
+  background:
+    radial-gradient(circle at 36% 28%, rgba(255,255,255,.28), rgba(255,255,255,0) 42%),
+    radial-gradient(circle at 50% 50%, rgba(124,58,237,.10), rgba(0,0,0,0) 55%),
+    radial-gradient(circle at 62% 74%, rgba(0,0,0,.55), rgba(0,0,0,0) 60%);
+  box-shadow:inset 0 0 2px 1px rgba(196,181,253,.35), inset 0 -30px 60px rgba(0,0,0,.5)}
+.ring{position:absolute;inset:-13px;width:calc(100% + 26px);height:calc(100% + 26px);z-index:2;pointer-events:none}
+.orbEmpty{position:absolute;z-index:2;text-align:center;color:#9aa3b8;pointer-events:none}
+.orbEmpty .t{font-size:15px;font-weight:800;color:#c9b8ff}
+.orbEmpty .s{font-size:11px;color:#6b7488;margin-top:3px;direction:ltr}
+
+.orbAct{position:relative;z-index:4;margin-top:12px;display:flex;flex-direction:column;align-items:center;gap:9px}
+.bigbtn{font-size:16px;font-weight:900;padding:13px 40px;border-radius:14px;border:0;cursor:pointer;color:#fff;transition:.18s;font-family:inherit}
+.bigbtn.search{background:linear-gradient(180deg,#12b3cc,#0a7286);box-shadow:0 0 30px #22d3ee55}
+.bigbtn.studio{background:linear-gradient(180deg,#e08810,#9a5c08);box-shadow:0 0 30px #f59e0b55}
+.bigbtn:hover{filter:brightness(1.12);transform:translateY(-1px)} .bigbtn:disabled{opacity:.45}
+.readout{position:relative;z-index:4;text-align:center;color:var(--muted);font-size:12px;min-height:34px}
+.readout .num{font-size:25px;font-weight:900}
+.readout .num.cy{color:var(--a1);text-shadow:0 0 22px #22d3ee66}
+.readout .num.rd{color:var(--red);text-shadow:0 0 22px #ff3b5266}
+.readout .num.am{color:var(--a2);text-shadow:0 0 22px #f59e0b66}
+.miniacts{position:relative;z-index:4;display:flex;gap:8px;margin-top:2px}
+
+/* ================= PANELS ================= */
+.card{background:linear-gradient(180deg,#070709,#040405);border:1px solid var(--line);border-radius:18px;padding:16px 18px;position:relative;transition:.3s}
+.card h3{margin:0 0 2px;font-size:16.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.card .lead{color:var(--muted);font-size:13px;margin:0 0 10px}
+.pill{font-size:10px;font-weight:800;padding:2px 9px;border-radius:999px}
+.pill.a1{background:#062a31;color:#5fe3f5;border:1px solid #0e5563}
+.pill.a2{background:#2c1f07;color:#f7c774;border:1px solid #5e440f}
+label{display:block;font-size:11.5px;color:var(--muted);font-weight:700;margin:11px 0 5px}
+textarea,input[type=text]{width:100%;background:#0a0a0d;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px 12px;font:inherit;resize:vertical}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.row>div{flex:1 1 90px}
+.rng{display:flex;flex-direction:column;font-size:11px;color:var(--muted)}.rng b{color:var(--ink)}
+input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent-color:var(--a2)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px;align-items:center}
+.status{font-size:12.5px;color:var(--muted);margin-top:9px;min-height:18px}.status b{color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;margin-top:11px}
+.grid canvas{width:100%;aspect-ratio:1;border-radius:7px;border:1px solid var(--line);background:#050506;
+  opacity:0;transform:scale(.5);transition:.4s cubic-bezier(.2,1.3,.3,1)}.grid canvas.show{opacity:1;transform:none}
+.compo{display:flex;gap:14px;align-items:flex-start;margin-top:13px}
+.compo .stack{position:relative;width:150px;height:150px;flex:0 0 auto}
+.compo .stack canvas{position:absolute;inset:0;width:150px;height:150px;border-radius:12px;border:1px solid var(--line);background:#050506}
+.compo .stack canvas#a1dots{background:transparent;pointer-events:none}
+.compo .cap{font-size:12.5px;color:var(--muted);line-height:1.7}
+.chip{display:inline-flex;align-items:center;gap:6px;background:#0d0d12;border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:11px;color:#cdd6ea;cursor:pointer;margin-top:8px}
+.chip:hover{border-color:var(--red);color:#fff}.chip .rd{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:13px}
+.stat{background:#050506;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.stat .n{font-size:20px;font-weight:900}.stat .l{font-size:10.5px;color:var(--muted)}
+.stat.cut .n{color:var(--red);text-shadow:0 0 20px #ff3b5255}
+.leads{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;margin-top:13px}
+.lead{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;background:#050506;opacity:0;transform:translateY(8px);transition:.4s}
+.lead.show{opacity:1;transform:none}
+.lead canvas{width:100%;aspect-ratio:1;display:block;filter:grayscale(.4) contrast(.95)}
+.lead .t{position:absolute;left:0;right:0;bottom:0;background:#000b;color:#cbd5e1;font-size:9px;padding:2px 4px;direction:ltr;text-align:left}
+.tgt{border-top:1px dashed var(--line);margin-top:13px;padding-top:11px}
+.hintline{font-size:11.5px;color:var(--a2);margin-top:6px}
+.compare{position:relative;margin-top:13px;border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:2/1;display:none;direction:ltr}
+.compare canvas{position:absolute;top:0;left:0;height:100%;width:100%;object-fit:cover}
+.compare .seam{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 12px #fff;left:50%}
+.compare .lbl{position:absolute;top:6px;font-size:10px;color:#fff;background:#000a;padding:2px 8px;border-radius:6px}
+.compare input[type=range]{position:absolute;bottom:8px;left:8%;width:84%;accent-color:#fff}
+.hist{display:flex;gap:7px;overflow-x:auto;margin-top:11px;padding-bottom:5px}
+.hist .h{flex:0 0 auto;text-align:center;opacity:0;transform:translateY(8px);transition:.4s;position:relative}
+.hist .h.show{opacity:1;transform:none}
+.hist canvas{width:70px;height:70px;border-radius:9px;border:1px solid var(--line);background:#050506}
+.hist .hl{font-size:9.5px;color:var(--muted);margin-top:3px;width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hist .arrow{position:absolute;right:-10px;top:26px;color:#3a4152}
+.disc{font-size:11px;color:#454b5a;margin-top:14px;border-top:1px solid var(--line);padding-top:10px;line-height:1.8}
+/* ---- guided step rail ---- */
+.rail{display:flex;align-items:center;margin:6px 0 12px}
+.rail .step{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--dim);white-space:nowrap;transition:.3s}
+.rail .step .b{width:21px;height:21px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-size:10px;color:var(--muted);background:#0a0a0d;transition:.3s}
+.rail .step.active{color:#dbe4f3}
+.rail .step.active .b{border-color:var(--rc,#25e0f5);color:#fff;box-shadow:0 0 12px var(--rc,#25e0f5);transform:scale(1.12)}
+.rail .step.done .b{border-color:var(--rc,#25e0f5);background:rgba(37,224,245,.14);color:var(--rc,#25e0f5)}
+.rail .cxn{flex:1;height:2px;background:var(--line);margin:0 7px;min-width:12px;position:relative;border-radius:2px;overflow:hidden}
+.rail .cxn::after{content:"";position:absolute;inset:0;width:0;background:linear-gradient(-90deg,var(--rc,#25e0f5),#5eead4);transition:width .5s}
+.rail .cxn.fill::after{width:100%}
+.rail.a2{--rc:#f5a524}.rail.a2 .cxn::after{background:linear-gradient(-90deg,#f5a524,#fbbf24)}
+/* ---- next-action pulse ---- */
+@keyframes pz{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}50%{box-shadow:0 0 0 4px rgba(255,255,255,.10),0 0 24px var(--pc,#25e0f5)}}
+.pulse{animation:pz 1.5s ease-in-out infinite}
+.bigbtn.search.pulse{--pc:#25e0f5}.bigbtn.studio.pulse{--pc:#f5a524}.btn.a2.pulse{--pc:#f5a524}
+#modeSwitch button.pulse{--pc:#f5a524;border-radius:999px}
+/* ---- living glow + hover affordances ---- */
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.92}50%{transform:scale(1.05);opacity:1}}
+.orbGlow{animation:breathe 5s ease-in-out infinite}
+.grid canvas{cursor:pointer}.grid canvas:hover{transform:scale(1.1)!important;border-color:#25e0f5;z-index:2}
+.lead{cursor:pointer}.lead:hover{transform:translateY(-2px) scale(1.06)!important;border-color:#25e0f5;z-index:2}
+.hist .h{cursor:pointer}.hist .h:hover canvas{border-color:#f5a524}
+/* ---- mic / voice prompt ---- */
+.lblrow{display:flex;align-items:center;justify-content:space-between}
+.micBtn{display:inline-flex;align-items:center;gap:6px;background:#0d0d12;border:1px solid var(--line);color:#cdd6ea;
+  border-radius:999px;padding:4px 11px;font-size:11px;font-weight:700;cursor:pointer;transition:.2s;font-family:inherit}
+.micBtn:hover{border-color:#25e0f5;color:#fff}
+.micBtn.rec{background:#3a0d14;border-color:#ff3b52;color:#ffb3bd;animation:recpulse 1s infinite}
+@keyframes recpulse{0%,100%{box-shadow:0 0 0 0 #ff3b5200}50%{box-shadow:0 0 0 4px #ff3b5233,0 0 16px #ff3b52}}
+.micBtn .m{width:7px;height:7px;border-radius:50%;background:#ff3b52;box-shadow:0 0 8px #ff3b52;display:none}
+.micBtn.rec .m{display:inline-block}
+
+.filePick{display:inline-flex;align-items:center;gap:8px;background:#0d0d12;border:1px solid var(--line);border-radius:10px;padding:7px 10px;color:#cdd6ea;font-size:11px;cursor:pointer}
+.filePick input{display:none}
+/* ---- public-figure reference candidates + stored faces ---- */
+.figrow{display:flex;gap:8px;align-items:end;margin-top:5px}.figrow>div{flex:1 1 auto}
+.figcands{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin-top:10px}
+.figcands .fc{border:1px solid var(--line);border-radius:9px;overflow:hidden;position:relative;background:#050506;cursor:pointer;opacity:0;transform:translateY(8px);transition:.35s}
+.figcands .fc.show{opacity:1;transform:none}
+.figcands .fc:hover{border-color:var(--a2)}
+.figcands .fc.sel{border-color:var(--a2);box-shadow:0 0 0 1px var(--a2),0 0 14px #f59e0b55}
+.figcands .fc canvas{width:100%;aspect-ratio:1;display:block}
+.figcands .fc .src{position:absolute;left:0;right:0;bottom:0;background:#000b;color:#cbd5e1;font-size:9px;padding:2px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.figcands .fc .del{position:absolute;top:4px;left:4px;width:18px;height:18px;border-radius:50%;background:#000c;color:#ff8b9b;
+  border:1px solid #3a0d14;display:grid;place-items:center;font-size:11px;line-height:1;cursor:pointer;z-index:3}
+.figcands .fc .del:hover{background:#ff3b52;color:#fff}
+.figcands .fc .score{position:absolute;top:4px;right:4px;background:#062a31cc;color:#5fe3f5;border:1px solid #0e5563;
+  font-size:9px;padding:1px 6px;border-radius:999px;direction:ltr}
+#orb{touch-action:none}
+/* ---- selection mode bar ---- */
+.selBar{display:flex;align-items:center;gap:10px;margin-top:12px}
+.selLbl{font-size:11.5px;color:var(--muted);font-weight:700;white-space:nowrap}
+.selSeg{margin-top:0;flex:1}
+.selSeg button{font-size:12px;padding:8px 6px}
+.selSeg button.on{background:linear-gradient(180deg,#c2740b,#8a5207);color:#fff}
+#orb.painting{cursor:crosshair}
+.brushBar{display:flex;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
+.brushSub{margin-top:0;flex:0 0 auto;width:auto}
+.brushSub button{font-size:12px;padding:7px 12px}
+.brushSub button.on{background:linear-gradient(180deg,#c2740b,#8a5207);color:#fff}
+.brushSize{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);font-weight:700;flex:1 1 120px;text-transform:none}
+.brushSize input{flex:1;accent-color:var(--a2)}
+.fastRow{display:flex;align-items:center;gap:7px;margin-top:9px;font-size:11.5px;color:var(--muted);font-weight:400;text-transform:none}
+.fastRow b{color:#5fe3f5;font-weight:800}
+.fastRow input{width:15px;height:15px;accent-color:var(--a1)}
+.offlineRow{display:flex;align-items:center;gap:10px;margin-top:9px;flex-wrap:wrap}
+.offlineHint{font-size:11px;color:var(--muted);flex:1 1 140px}
+
+/* ---- small screens: fall back to stacked scrolling layout ---- */
+@media (max-width:980px){
+  html,body{overflow:auto}
+  .wrap{height:auto}
+  .main{display:flex;flex-direction:column;direction:rtl}
+  .stageCol{min-height:540px}
+  .panelCol{overflow:visible}
+}
+/* ---- gender toggle ---- */
+.genderRow{display:flex;align-items:center;gap:10px;margin-top:9px}
+.genderRow .gLbl{font-size:12px;color:#9aa7bd}
+.gseg{display:inline-flex;background:#08080b;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.gseg button{background:transparent;border:0;color:#9aa7bd;font:inherit;font-size:12px;padding:5px 14px;cursor:pointer;transition:.15s}
+.gseg button.on{background:var(--a1);color:#04222a;font-weight:800}
+#c2gender button.on{background:var(--a2);color:#2a1b00}
+/* ---- custom gallery + reconstruction boxes ---- */
+.galBox,.reconBox{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#0a0a0e}
+.galHead{font-size:12.5px;font-weight:800;color:#cdd6ea;margin-bottom:8px}
+.galCount{font-weight:400;color:#7f8ca3;font-size:11.5px}
+.galRow{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.galSel{flex:1;min-width:0;background:#0d0d12;border:1px solid var(--line);color:#cdd6ea;border-radius:9px;padding:7px 9px;font:inherit;font-size:12px}
+.galBuild{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.galInput{flex:1;min-width:120px;background:#0a0a0d;border:1px solid var(--line);color:var(--ink);border-radius:9px;padding:7px 9px;font:inherit;font-size:12px;direction:ltr;text-align:left}
+.galProg{height:7px;background:#14151b;border-radius:6px;overflow:hidden;margin-top:9px}
+.galBar{height:100%;width:0;background:linear-gradient(90deg,var(--a1),var(--good));transition:width .3s}
+.reconRow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mirrorChk{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#9aa7bd;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand"><div class="logo"></div>
+      <div><h1>الرسام الجنائي</h1><div class="tag">الرسام الجنائي · بصمة واحدة، مساران</div></div></div>
+    <div class="api">
+      <div class="engSwitch" id="engSwitch" style="display:none" title="محرك التوليد على الخادم البعيد">
+        <button data-eng="klein" class="on">Klein · سريع</button>
+        <button data-eng="dev">Dev · دقة</button>
+      </div>
+      <span class="dot" id="hdot"></span><span id="hstate">وضع تجريبي</span>
+      <input id="apiurl" type="text" placeholder="http://localhost:8000"/>
+      <button class="btn ghost" id="connectBtn" style="padding:6px 12px;font-size:12px">اتصال</button></div>
+  </div>
+
+  <div class="main">
+    <!-- ============ THE CIRCLE (left column) ============ -->
+    <section class="stageCol">
+      <canvas id="fx"></canvas>
+      <div class="modeSwitch" id="modeSwitch">
+        <button class="on" data-m="search">◍ البحث</button>
+        <button data-m="studio">◉ الهوية</button>
+      </div>
+
+      <div class="orbWrap" id="orbWrap">
+        <div class="orbGlow" id="orbGlow"></div>
+        <svg class="ring" id="ring" viewBox="0 0 100 100"></svg>
+        <div class="orb" id="orb">
+          <canvas id="orbFace" width="280" height="280"></canvas>
+          <canvas id="selOverlay" width="280" height="280"></canvas>
+          <div class="sphere"></div>
+        </div>
+        <div class="orbEmpty" id="orbEmpty"><div class="t">بصمة الوجه</div><div class="s">ArcFace · 512-d</div></div>
+      </div>
+
+      <div class="orbAct">
+        <button class="bigbtn search" id="bigBtn">▶ تشغيل البحث</button>
+        <div class="miniacts" id="miniacts"><button class="btn ghost" id="stepBtn" style="font-size:12px;padding:8px 15px">▷ خطوة بخطوة</button></div>
+        <div class="readout" id="readout"><span class="num cy" id="rNum">—</span><div id="rCap">اتصل بالخادم ثم شغّل البحث</div></div>
+      </div>
+    </section>
+
+    <!-- ============ DESCRIPTION + EDIT (right column) ============ -->
+    <section class="panelCol">
+      <!-- Search -->
+      <div class="card" id="panelA1">
+        <h3>◍ البحث التوافقي <span class="pill a1">KLEIN</span></h3>
+        <p class="lead">وصف مبدئي، ثم وجوه أمامية مولّدة، ثم تضمين ArcFace، ثم متجه واحد بالمتوسط، ثم ترتيب حسب <b>نسبة التشابه</b>.
+          الملامح التي <b>تصفها</b> تبقى حادة، وما لا تذكره <b>يتلاشى مع المتوسط</b> — بلا اختراع ولا هوية مُتوهّمة.</p>
+        <div class="rail" id="a1rail">
+          <div class="step"><span class="b">1</span>الوصف</div><div class="cxn"></div>
+          <div class="step"><span class="b">2</span>وجوه أمامية</div><div class="cxn"></div>
+          <div class="step"><span class="b">3</span>المتوسط</div><div class="cxn"></div>
+          <div class="step"><span class="b">4</span>بحث 70 ألفاً</div><div class="cxn"></div>
+          <div class="step"><span class="b">5</span>النتائج</div>
+        </div>
+        <div class="lblrow"><label>الوصف</label><button class="micBtn" id="a1mic" type="button"><span class="m"></span>🎤 تحدث</button></div>
+        <textarea id="a1prompt" rows="2">رجل في الثلاثين من عمره، جبهة عريضة، عيون ضيقة، لحية كثيفة</textarea>
+        <div class="row">
+          <div class="rng">صور التوافق <b id="a1nL">30</b><input id="a1n" type="range" min="6" max="40" value="30"></div>
+          <div class="rng">عدد النتائج <b id="a1kL">18</b><input id="a1k" type="range" min="6" max="30" value="18"></div>
+        </div>
+        <div class="genderRow"><span class="gLbl">النوع:</span>
+          <div class="seg gseg" id="a1gender"><button class="on" data-g="">تلقائي</button><button data-g="male">رجل</button><button data-g="female">امرأة</button></div>
+        </div>
+        <label class="fastRow"><input type="checkbox" id="a1fast" checked> <b>⚡ وضع سريع</b></label>
+        <div class="offlineRow">
+          <label class="filePick" style="margin:0">📷 بحث بصورة (بدون إنترنت)<input id="a1imgSearch" type="file" accept="image/*"></label>
+          <span class="offlineHint">ارفع صورة وجه — تُطابَق محلياً مع المعرض فوراً دون توليد ولا إنترنت.</span>
+        </div>
+        <div class="galBox">
+          <div class="galHead">🗂 قاعدة بيانات البحث · Qdrant <span class="galCount" id="a1galCount"></span></div>
+          <div class="galRow">
+            <select id="a1gallery" class="galSel"></select>
+            <button class="btn ghost" id="a1galRefresh" title="تحديث" style="padding:6px 11px;font-size:13px">↻</button>
+          </div>
+          <div class="galBuild">
+            <input id="a1galname" class="galInput" placeholder="اسم القاعدة الجديدة"/>
+            <label class="filePick" style="margin:0">➕ رفع مجلد مضغوط (zip)<input id="a1galzip" type="file" accept=".zip"></label>
+            <input id="a1galpath" class="galInput" placeholder="أو مسار مجلد على الخادم: /content/mydb"/>
+            <button class="btn a2" id="a1galbuild" style="padding:8px 14px">🔨 بناء وتفعيل</button>
+          </div>
+          <div class="galProg" id="a1galprog" style="display:none"><div class="galBar" id="a1galbar"></div></div>
+          <div class="hintline" id="a1galstatus">ابحث في المعرض الأساسي، أو ابنِ قاعدة من صورك (zip أو مجلد على الخادم) واستخدم البحث التوافقي عليها فوراً.</div>
+        </div>
+        <div class="status" id="a1status">اكتب الوصف ثم اضغط التشغيل — أو ارفع صورة للبحث بها بلا إنترنت.</div>
+        <div class="grid" id="a1grid"></div>
+        <div class="compo" id="a1compo" style="display:none">
+          <div class="stack"><canvas id="a1comp" width="150" height="150"></canvas><canvas id="a1dots" width="150" height="150"></canvas></div>
+          <div class="cap"><b style="color:#cdd6ea">هذه هي البصمة مرسومة.</b><br>الواضح = ملامح ذكرتها في الوصف.<br>
+            الأحمر = مناطق لم تحددها فتباينت عبر الوجوه وتلاشت.
+            <div class="chip" id="a1dotsToggle"><span class="rd"></span> إخفاء النقاط الحمراء</div></div>
+        </div>
+        <div class="stats" id="a1stats" style="display:none">
+          <div class="stat cut"><div class="n" id="a1cut">96%</div><div class="l">استُبعد من القاعدة</div></div>
+          <div class="stat"><div class="n" id="a1short">3,000</div><div class="l">مرشح محتفظ به</div></div>
+          <div class="stat"><div class="n" id="a1time">&lt;2د</div><div class="l">الزمن الكلي</div></div>
+        </div>
+        <div class="leads" id="a1leads"></div>
+      </div>
+
+      <!-- Identity -->
+      <div class="card a2" id="panelC2" style="display:none">
+        <h3>◉ استوديو الهوية <span class="pill a2">توليد · قفل · تعديل · حفظ</span></h3>
+        <p class="lead">ولّد وجهاً (أو اجلب صور شخصية عامة)، <b>اقفل بصمته</b>، ثم عدّل عليه مع الحفاظ على الهوية.
+          اسحب فوق الدائرة لتحديد منطقة التعديل، واحفظ البصمة في <b>قاعدة Qdrant</b> لاسترجاع الملامح نفسها لاحقاً.</p>
+        <div class="rail a2" id="c2rail">
+          <div class="step"><span class="b">1</span>توليد</div><div class="cxn"></div>
+          <div class="step"><span class="b">2</span>قفل</div><div class="cxn"></div>
+          <div class="step"><span class="b">3</span>تعديل</div><div class="cxn"></div>
+          <div class="step"><span class="b">4</span>النتيجة</div>
+        </div>
+        <label>شخصية عامة — جلب صور حقيقية من الويب</label>
+        <div class="figrow">
+          <div><input id="c2figure" type="text" placeholder="مثال: ألبرت أينشتاين"/></div>
+          <button class="btn a2" id="c2figfetch" type="button" style="flex:0 0 auto">🌐 جلب الصور</button>
+        </div>
+        <div class="figcands" id="c2figcands" style="display:none"></div>
+        <div class="hintline" id="c2fignote" style="display:none"></div>
+        <div class="lblrow" style="margin-top:10px"><label style="margin:0">الوجه الأساس — صِفه</label><button class="micBtn" id="c2mic" type="button"><span class="m"></span>🎤 تحدث</button></div>
+        <textarea id="c2prompt" rows="2">رجل في الثلاثين من عمره، لحية كثيفة، إضاءة استوديو</textarea>
+        <div class="genderRow"><span class="gLbl">النوع:</span>
+          <div class="seg gseg" id="c2gender"><button class="on" data-g="">تلقائي</button><button data-g="male">رجل</button><button data-g="female">امرأة</button></div>
+        </div>
+        <div class="btns">
+          <label class="filePick" style="margin:0">⬆ رفع صورة أساس<input id="c2basefile" type="file" accept="image/*"></label>
+          <button class="btn a2" id="c2lock">🔒 قفل الهوية</button>
+        </div>
+        <div class="reconBox">
+          <div class="galHead">🧩 وجه ناقص / جانبي / ملثّم — أعِد بناءه أمامياً</div>
+          <div class="reconRow">
+            <label class="filePick" style="margin:0">⬆ صورة جزئية<input id="c2partial" type="file" accept="image/*"></label>
+            <select id="c2occ" class="galSel">
+              <option value="">التغطية: تلقائي</option>
+              <option value="left">اليسار مغطى</option>
+              <option value="right">اليمين مغطى</option>
+              <option value="lower">ملثّم / الفم مغطى</option>
+              <option value="upper">الأعلى مغطى</option>
+              <option value="profile">جانبي (بروفايل)</option>
+            </select>
+            <label class="mirrorChk"><input type="checkbox" id="c2mirror"> توليد تماثلي</label>
+            <label class="mirrorChk"><input type="checkbox" id="c2faceid"> توليد من متجه غير مكتمل</label>
+            <button class="btn a2" id="c2recon" style="padding:8px 14px" disabled>✨ أعِد البناء</button>
+          </div>
+          <div class="hintline" id="c2reconStatus">للجانبي أو نصف الوجه المغطى: ارفع الصورة، اختر نوع التغطية، ثم أعِد البناء لوجه أمامي كامل يصلح للتعديل والبحث.</div>
+        </div>
+        <div class="reconBox">
+          <div class="galHead">🧬 ادمج حتى ١٠ صور لنفس الشخص — هوية أقوى</div>
+          <div class="reconRow">
+            <label class="filePick" style="margin:0">⬆ صور (حتى ١٠)<input id="c2blendfiles" type="file" accept="image/*" multiple></label>
+            <span class="hintline" id="c2blendCount" style="margin:0"></span>
+            <label class="mirrorChk"><input type="checkbox" id="c2blendRecon"> ولّد وجهاً أمامياً من البصمة</label>
+            <button class="btn a2" id="c2blend" style="padding:8px 14px" disabled>🧬 ادمج</button>
+          </div>
+          <div class="hintline" id="c2blendStatus">ارفع حتى ١٠ صور لنفس الشخص — <b>حتى لو كان بعضها جزئياً أو جانبياً أو ملثّماً أو بزوايا مختلفة</b>. نأخذ متوسط بصماتها في هوية واحدة ثابتة يقلّ فيها التذبذب، مع خيار توليد وجه أمامي كامل منها.</div>
+        </div>
+        <div class="selBar">
+          <span class="selLbl">التحديد:</span>
+          <div class="seg selSeg" id="c2selMode">
+            <button class="on" data-s="whole">كامل الوجه</button>
+            <button data-s="brush">🖌 فرشاة</button>
+            <button data-s="smart">🎯 نقر ذكي</button>
+          </div>
+        </div>
+        <div class="brushBar" id="c2brushBar" style="display:none">
+          <div class="seg brushSub" id="c2brushSub">
+            <button class="on" data-b="paint">🖌 رسم</button>
+            <button data-b="erase">🧽 مسح</button>
+          </div>
+          <label class="brushSize">الحجم <input type="range" id="c2brush" min="6" max="70" value="26"></label>
+          <button class="btn ghost" id="c2selClear" style="padding:6px 12px;font-size:12px">مسح الكل</button>
+        </div>
+        <div class="hintline" id="c2scope">التعديل: كامل الوجه</div>
+        <label style="margin-top:10px">تعليمات التعديل</label>
+        <textarea id="c2edit" rows="2" placeholder="أمثلة: أضف نظارة طبية · اجعله أكبر سناً · للمنطقة المحددة: ندبة على الخد"></textarea>
+        <div class="btns">
+          <button class="btn a2" id="c2apply">تطبيق التعديل</button>
+          <button class="btn ghost" id="c2clearsel" style="display:none">إلغاء تحديد المنطقة</button>
+        </div>
+        <div class="status" id="c2status">انتقل إلى «الهوية» ثم اضغط «توليد» بجانب الدائرة.</div>
+        <div class="compare" id="c2compare">
+          <canvas id="cmpBefore" width="280" height="280"></canvas><canvas id="cmpAfter" width="280" height="280"></canvas>
+          <div class="seam" id="cmpSeam"></div><div class="lbl" style="left:8px">قبل</div><div class="lbl" style="right:8px">بعد</div>
+          <input type="range" id="cmpRange" min="0" max="100" value="50">
+        </div>
+        <div class="hist" id="c2hist"></div>
+
+        <!-- ============ Qdrant face vault ============ -->
+        <div class="tgt" id="dbSection">
+          <h3 style="font-size:15px">🗄 خزنة الوجوه <span class="pill a2">قاعدة Qdrant للمتجهات</span></h3>
+          <p class="lead" style="margin-bottom:6px">احفظ بصمة ArcFace الحالية (512 بُعداً) باسم تختاره،
+            واسترجعها في أي وقت <b>بنفس الملامح الفريدة تماماً</b> — البصمة المخزنة تعود كما هي دون إعادة تقدير.</p>
+          <div class="figrow">
+            <div><input id="dbName" type="text" placeholder="اسم الوجه (مثال: الحالة رقم 7)"/></div>
+            <button class="btn a2" id="dbSave" type="button" style="flex:0 0 auto">💾 حفظ الوجه</button>
+            <button class="btn ghost" id="dbLoad" type="button" style="flex:0 0 auto">📂 استرجاع المخزَّن</button>
+          </div>
+          <div class="status" id="dbStatus">اتصل بالخادم لعرض حالة قاعدة البيانات.</div>
+          <div class="figcands" id="dbFaces" style="display:none"></div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const fmt = n => Number(n || 0).toLocaleString("en-US");
+const fmtEta = sec => { sec = Math.round(sec); if (sec < 60) return `${sec} ث`; const m = Math.floor(sec / 60), s = sec % 60; if (m < 60) return s ? `${m} د ${s} ث` : `${m} د`; const h = Math.floor(m / 60); return `${h} س ${m % 60} د`; };
+const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[ch]);
+
+/* =====================================================================
+   API — the frontend never invents model results. It renders backend data.
+===================================================================== */
+const api = {
+  base: null,
+  healthInfo: null,
+  async request(path, options = {}) {
+    if (!this.base) throw new Error("اتصل بالخادم أولاً.");
+    const response = await fetch(this.base + path, options);
+    let data = null;
+    try { data = await response.json(); } catch (_) { data = {}; }
+    if (!response.ok) throw new Error(data.detail || `${path} أعاد HTTP ${response.status}`);
+    return data;
+  },
+  health(url) {
+    const base = url.replace(/\/$/, "");
+    return fetch(base + "/health").then(async response => {
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `health أعاد ${response.status}`);
+      return data;
+    });
+  },
+  post(path, body) {
+    return this.request(path, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+  },
+};
+const connected = () => Boolean(api.base);
+
+function setHealth(on, text, kind = "") {
+  $("hdot").className = "dot " + (on ? "on" : "");
+  $("hstate").textContent = text;
+  $("hstate").title = kind;
+}
+
+function describeFacesDb(health) {
+  const faces = health?.faces;
+  if (!faces) return "";
+  return faces.ready
+    ? `قاعدة Qdrant جاهزة (${faces.mode === "remote" ? "خادم بعيد" : "مدمجة محلياً"}) · ${fmt(faces.count)} وجه مخزن.`
+    : `قاعدة Qdrant غير جاهزة: ${faces.error || "غير معروف"}`;
+}
+
+let engineModel = null;  // "dev" | "klein" when the backend delegates to a remote API
+document.querySelectorAll("#engSwitch button").forEach(button => button.onclick = () => {
+  engineModel = button.dataset.eng;
+  document.querySelectorAll("#engSwitch button").forEach(node => node.classList.toggle("on", node === button));
+});
+function syncEngineSwitch(health) {
+  const isRemote = health?.engine === "remote";
+  $("engSwitch").style.display = isRemote ? "flex" : "none";
+  if (isRemote) {
+    engineModel = health.remote_model === "dev" ? "dev" : "klein";
+    document.querySelectorAll("#engSwitch button").forEach(node =>
+      node.classList.toggle("on", node.dataset.eng === engineModel));
+  } else {
+    engineModel = null;
+  }
+}
+
+async function connectBackend(url, quiet = false) {
+  const clean = String(url || "").trim().replace(/\/$/, "");
+  if (!clean) {
+    api.base = null;
+    api.healthInfo = null;
+    setHealth(false, "الخادم مطلوب");
+    return false;
+  }
+  try {
+    const health = await api.health(clean);
+    api.base = clean;
+    api.healthInfo = health;
+    $("apiurl").value = clean;
+    const remoteDown = health.engine === "remote" && health.remote_ok === false;
+    const model = health.mock ? "خادم تجريبي"
+      : (health.engine === "remote" ? (remoteDown ? "⚠️ خادم التوليد غير متصل" : "خادم بعيد") : (health.model_kind || "GPU"));
+    const search = health.search?.ready ? "البحث جاهز" : "فهرس البحث غير مجهز";
+    const faces = health.faces?.ready ? `الخزنة: ${fmt(health.faces.count)}` : "الخزنة غير جاهزة";
+    setHealth(!remoteDown, `${model} · ${search} · ${faces}`, JSON.stringify(health, null, 2));
+    if (remoteDown) $("hstate").title = "تعذّر الوصول إلى خادم التوليد: " + (health.remote_error || "");
+    $("dbStatus").textContent = describeFacesDb(health);
+    syncEngineSwitch(health);
+    try { refreshGalleries(); } catch (_) {}
+    return true;
+  } catch (error) {
+    api.base = null;
+    api.healthInfo = null;
+    setHealth(false, "تعذر الوصول");
+    if (!quiet) alert(error.message);
+    return false;
+  }
+}
+
+$("connectBtn").onclick = () => connectBackend($("apiurl").value);
+
+/* =====================================================================
+   Canvas/image helpers
+===================================================================== */
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("أعاد الخادم صورة غير قابلة للقراءة."));
+    image.src = src;
+  });
+}
+
+async function drawUrl(canvas, src, mode = "cover") {
+  if (!src) return;
+  const image = await loadImage(src);
+  const context = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  context.clearRect(0, 0, W, H);
+  if (mode === "contain") {
+    const scale = Math.min(W / image.width, H / image.height);
+    const w = image.width * scale, h = image.height * scale;
+    context.drawImage(image, (W - w) / 2, (H - h) / 2, w, h);
+  } else {
+    const scale = Math.max(W / image.width, H / image.height);
+    const w = image.width * scale, h = image.height * scale;
+    context.drawImage(image, (W - w) / 2, (H - h) / 2, w, h);
+  }
+}
+
+function clearCanvas(canvas) {
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function orbHint() {
+  $("orbEmpty").style.display = "block";
+  $("orbFace").style.opacity = 0;
+  clearCanvas($("orbFace"));
+}
+
+async function orbShowImage(src) {
+  $("orbEmpty").style.display = "none";
+  $("orbFace").style.opacity = 1;
+  await drawUrl($("orbFace"), src, "cover");
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("تعذر قراءة الملف المحدد."));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* =====================================================================
+   ORB FX
+===================================================================== */
+const fx = $("fx"), fctx = fx.getContext("2d");
+let ORB = {cx: 0, cy: 0, r: 140};
+let particles = [];
+function resizeFx() {
+  const stage = fx.parentElement;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  fx.width = stage.clientWidth * dpr;
+  fx.height = stage.clientHeight * dpr;
+  fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const orbRect = $("orbWrap").getBoundingClientRect();
+  const stageRect = stage.getBoundingClientRect();
+  ORB.cx = orbRect.left - stageRect.left + orbRect.width / 2;
+  ORB.cy = orbRect.top - stageRect.top + orbRect.height / 2;
+}
+function seedAmbient() {
+  particles = Array.from({length: 80}, () => ({
+    a: Math.random() * Math.PI * 2,
+    r: ORB.r + 40 + Math.random() * 80,
+    s: .001 + Math.random() * .0015,
+    z: .8 + Math.random() * 1.6,
+    o: .18 + Math.random() * .3,
+  }));
+}
+function animateFx() {
+  fctx.clearRect(0, 0, fx.width, fx.height);
+  for (const p of particles) {
+    p.a += p.s;
+    fctx.globalAlpha = p.o;
+    fctx.fillStyle = mode === "studio" ? "#60451f" : "#1b4250";
+    fctx.beginPath();
+    fctx.arc(ORB.cx + Math.cos(p.a) * p.r, ORB.cy + Math.sin(p.a) * p.r, p.z, 0, Math.PI * 2);
+    fctx.fill();
+  }
+  fctx.globalAlpha = 1;
+  requestAnimationFrame(animateFx);
+}
+
+function ring(percent) {
+  const p = clamp(Number(percent || 0), 0, 100);
+  const R = 48, circumference = Math.PI * 2 * R;
+  const color = p >= 60 ? "#34d399" : p >= 40 ? "#fbbf24" : "#f87171";
+  $("ring").innerHTML = p <= 0 ? "" : `<circle cx="50" cy="50" r="48" fill="none" stroke="#12151d" stroke-width="2.4"/>
+    <circle cx="50" cy="50" r="48" fill="none" stroke="${color}" stroke-width="2.8" stroke-linecap="round"
+      stroke-dasharray="${circumference}" stroke-dashoffset="${circumference * (1 - p / 100)}"
+      transform="rotate(-90 50 50)" style="transition:stroke-dashoffset .5s;filter:drop-shadow(0 0 4px ${color})"/>`;
+}
+
+function railSet(id, active) {
+  const rail = $(id); if (!rail) return;
+  const steps = [...rail.children].filter(node => node.classList.contains("step"));
+  const connectors = [...rail.children].filter(node => node.classList.contains("cxn"));
+  steps.forEach((step, i) => {
+    step.classList.toggle("done", i < active);
+    step.classList.toggle("active", i === active);
+    step.querySelector(".b").textContent = i < active ? "✓" : String(i + 1);
+  });
+  connectors.forEach((connector, i) => connector.classList.toggle("fill", i < active));
+}
+function guide(element) {
+  document.querySelectorAll(".pulse").forEach(node => node.classList.remove("pulse"));
+  if (element) element.classList.add("pulse");
+}
+const studioModeButton = () => document.querySelector('#modeSwitch button[data-m="studio"]');
+
+/* =====================================================================
+   MODE
+===================================================================== */
+let mode = "search";
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll("#modeSwitch button").forEach(button => button.classList.toggle("on", button.dataset.m === next));
+  $("orbGlow").classList.toggle("studio", next === "studio");
+  $("panelA1").style.display = next === "search" ? "block" : "none";
+  $("panelC2").style.display = next === "studio" ? "block" : "none";
+  if (next === "search") {
+    $("bigBtn").className = "bigbtn search";
+    $("bigBtn").textContent = "▶ تشغيل البحث";
+    $("stepBtn").style.display = "inline-block";
+    $("rNum").className = "num cy";
+    ring(0);
+    if (searchResult?.composite) {
+      orbShowImage(searchResult.composite);
+      $("rNum").textContent = fmt(searchResult.shortlist);
+      $("rCap").textContent = searchResult.real ? "قائمة مرشحين توافقية مرتبة" : "قائمة تجريبية (DEMO)";
+      railSet("a1rail", 5);
+    } else {
+      orbHint();
+      $("rNum").textContent = "—";
+      $("rCap").textContent = "اتصل بالخادم ثم شغّل البحث";
+      railSet("a1rail", 0);
+    }
+  } else {
+    $("bigBtn").className = "bigbtn studio";
+    $("bigBtn").textContent = "✦ توليد";
+    $("stepBtn").style.display = "none";
+    $("rNum").className = "num am";
+    if (current.image) {
+      orbShowImage(current.image);
+      ring(current.locked ? 100 : 0);
+      $("rNum").textContent = current.locked ? "100%" : "";
+      $("rCap").textContent = current.locked ? "بصمة الهوية مقفلة ومخزنة" : "الأساس جاهز — اقفل الهوية";
+      railSet("c2rail", current.locked ? 2 : 1);
+    } else {
+      orbHint(); ring(0);
+      $("rNum").textContent = "";
+      $("rCap").textContent = "ولّد أو ارفع، اقفل، ثم عدّل";
+      railSet("c2rail", 0);
+    }
+  }
+}
+document.querySelectorAll("#modeSwitch button").forEach(button => button.onclick = () => setMode(button.dataset.m));
+$("bigBtn").onclick = () => mode === "search" ? runSearch() : generateBase();
+
+/* =====================================================================
+   SEARCH
+===================================================================== */
+$("a1n").oninput = event => $("a1nL").textContent = event.target.value;
+$("a1k").oninput = event => $("a1kL").textContent = event.target.value;
+/* Fast mode lightens each query render (smaller canvas, fewer steps) but keeps
+   the FULL consensus count — 30 seeds averaged is the whole point of the search. */
+$("a1fast").onchange = () => {};
+let searchResult = null;
+let searchStep = null;
+let a1dotList = [], a1dotsShown = true;
+
+function varianceDots(canvases, W, H) {
+  if (!canvases.length) return [];
+  const S = 64, off = document.createElement("canvas");
+  off.width = off.height = S;
+  const context = off.getContext("2d", {willReadFrequently: true});
+  const sum = new Float32Array(S * S), sum2 = new Float32Array(S * S);
+  for (const canvas of canvases) {
+    context.clearRect(0, 0, S, S);
+    context.drawImage(canvas, 0, 0, S, S);
+    const data = context.getImageData(0, 0, S, S).data;
+    for (let p = 0, q = 0; p < data.length; p += 4, q++) {
+      const value = data[p] * .3 + data[p + 1] * .59 + data[p + 2] * .11;
+      sum[q] += value; sum2[q] += value * value;
+    }
+  }
+  let maxVariance = 1e-6;
+  const variance = new Float32Array(S * S);
+  for (let q = 0; q < variance.length; q++) {
+    const mean = sum[q] / canvases.length;
+    variance[q] = Math.max(0, sum2[q] / canvases.length - mean * mean);
+    maxVariance = Math.max(maxVariance, variance[q]);
+  }
+  const dots = [];
+  for (let y = 2; y < S - 2; y += 2) for (let x = 2; x < S - 2; x += 2) {
+    const value = variance[y * S + x] / maxVariance;
+    if (value > .22) dots.push({x: x / S * W, y: y / S * H, v: Math.min(1, value)});
+  }
+  return dots.filter((_, i) => i % 2 === 0);
+}
+function paintDots(alpha = 1) {
+  const context = $("a1dots").getContext("2d");
+  context.clearRect(0, 0, 150, 150);
+  if (!a1dotsShown) return;
+  // Additive blending so overlapping dots on a highly-blurred area build up into
+  // a deeper red — intensity reads as "how blurred", exactly as it should.
+  context.globalCompositeOperation = "lighter";
+  for (const dot of a1dotList) {
+    const v = Math.max(0, Math.min(1, dot.v));
+    context.beginPath();
+    // opacity and size both grow with local blur; faint blur -> faint small dot.
+    context.fillStyle = `rgba(255,${Math.round(70 - 45 * v)},${Math.round(90 - 55 * v)},${(0.18 + 0.6 * v) * alpha})`;
+    context.shadowColor = "#ff3b52"; context.shadowBlur = 4 + 6 * v;
+    context.arc(dot.x, dot.y, 1.4 + v * 2.6, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.shadowBlur = 0;
+  context.globalCompositeOperation = "source-over";
+}
+$("a1dotsToggle").onclick = () => {
+  a1dotsShown = !a1dotsShown;
+  paintDots(1);
+  $("a1dotsToggle").innerHTML = a1dotsShown ? '<span class="rd"></span> إخفاء النقاط الحمراء' : '<span class="rd" style="background:#334"></span> إظهار النقاط الحمراء';
+};
+
+function resetSearchUI() {
+  $("a1grid").innerHTML = "";
+  $("a1leads").innerHTML = "";
+  $("a1stats").style.display = "none";
+  $("a1compo").style.display = "none";
+  clearCanvas($("a1comp")); clearCanvas($("a1dots"));
+}
+
+async function renderSearchFaces(result) {
+  $("a1grid").innerHTML = "";
+  const canvases = [];
+  for (let i = 0; i < result.faces.length; i++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 128;
+    canvas.title = `وجه الاستعلام المولّد ${i + 1}`;
+    $("a1grid").appendChild(canvas);
+    await drawUrl(canvas, result.faces[i]);
+    canvases.push(canvas);
+    setTimeout(() => canvas.classList.add("show"), i * 18);
+  }
+  return canvases;
+}
+
+function dotsForComposite(result, canvases, W, H) {
+  // Prefer the backend's variance dots: they are computed from the SAME
+  // landmark-aligned crop stack that the composite is averaged from.
+  const dots = result && result.variance_dots;
+  if (Array.isArray(dots) && dots.length) {
+    return dots.map(d => ({
+      x: clamp(Number(d.x) || 0, 0, 1) * W,
+      y: clamp(Number(d.y) || 0, 0, 1) * H,
+      v: clamp(Number(d.v) || 0, 0, 1),
+    }));
+  }
+  return varianceDots(canvases, W, H);
+}
+
+async function renderSearchComposite(result, canvases) {
+  $("a1compo").style.display = "flex";
+  await drawUrl($("a1comp"), result.composite);
+  await orbShowImage(result.composite);
+  a1dotList = dotsForComposite(result, canvases, 150, 150);
+  a1dotsShown = true; paintDots(1);
+}
+
+function renderSearchStats(result) {
+  $("a1cut").textContent = `${Number(result.eliminated_percent).toFixed(result.real ? 1 : 0)}%`;
+  $("a1short").textContent = fmt(result.shortlist);
+  $("a1time").textContent = `${Number(result.seconds).toFixed(1)} ث`;
+  $("a1stats").style.display = "grid";
+  $("rNum").textContent = fmt(result.shortlist);
+  $("rNum").className = "num " + (result.real ? "rd" : "am");
+  $("rCap").textContent = result.real
+    ? `${fmt(result.gallery)} وجه في المعرض · ${fmt(result.shortlist)} مرشحاً توافقياً`
+    : "نتيجة تجريبية — جهّز فهرس FAISS للبحث الحقيقي";
+}
+
+async function renderSearchLeads(result) {
+  $("a1leads").innerHTML = "";
+  for (let i = 0; i < result.leads.length; i++) {
+    const lead = result.leads[i];
+    const wrapper = document.createElement("div"); wrapper.className = "lead";
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 128;
+    const label = document.createElement("div"); label.className = "t";
+    // Interpretable score: cosine similarity shown as a percentage.
+    const pct = Math.max(0, Math.round(Number(lead.score) * 100));
+    label.textContent = `#${lead.rank} · تشابه ${pct}%`;
+    wrapper.append(canvas, label); $("a1leads").appendChild(wrapper);
+    await drawUrl(canvas, lead.image);
+    if (lead.full && api.base) {   // full-resolution original stored in MinIO
+      wrapper.style.cursor = "zoom-in";
+      wrapper.title = "عرض الصورة الأصلية كاملة الدقة";
+      wrapper.onclick = () => window.open(api.base + "/gallery/original?obj=" + encodeURIComponent(lead.full), "_blank");
+    }
+    setTimeout(() => wrapper.classList.add("show"), i * 30);
+  }
+}
+
+async function fetchSearch() {
+  if (!connected()) throw new Error("الخادم غير متصل.");
+  const prompt = $("a1prompt").value.trim();
+  if (!prompt) throw new Error("أدخل وصفاً للوجه أولاً.");
+  return api.post("/search", {
+    prompt,
+    n: Number($("a1n").value),
+    k: Number($("a1k").value),
+    side_weight: .7,
+    gender: segVal("a1gender", "data-g") || null,
+    fast: $("a1fast").checked,
+  });
+}
+
+/* Fully-offline search: embed the uploaded photo locally, match the local index. */
+$("a1imgSearch").onchange = async event => {
+  const file = event.target.files?.[0]; if (!file) return;
+  event.target.value = "";
+  if (!connected()) { $("a1status").textContent = "شغّل التطبيق أولاً."; return; }
+  resetSearchUI(); guide(null); railSet("a1rail", 4);
+  $("a1status").innerHTML = "🔒 بحث محلي بلا إنترنت: تضمين الصورة ومطابقتها مع المعرض…";
+  try {
+    const data = await fileToDataUrl(file);
+    await orbShowImage(data);
+    const result = await api.post("/search_image", {image: data, k: Number($("a1k").value)});
+    searchResult = null;
+    renderSearchStats({...result, seconds: result.seconds || 0, eliminated_percent: 0});
+    railSet("a1rail", 5);
+    await renderSearchLeads(result);
+    $("rNum").textContent = fmt(result.gallery); $("rNum").className = "num rd";
+    $("rCap").textContent = "بحث محلي بالصورة — بلا إنترنت";
+    $("a1status").innerHTML = `تمت المطابقة محلياً مع <b>${fmt(result.gallery)}</b> وجهاً — بلا توليد ولا إنترنت (${result.seconds}ث). النتائج مرتبة بنسبة التشابه.`;
+  } catch (error) {
+    $("a1status").innerHTML = `<span style="color:#ff7b8b"><b>فشل البحث بالصورة:</b> ${esc(error.message)}</span>`;
+  }
+};
+
+async function runSearch() {
+  $("bigBtn").disabled = true; $("stepBtn").disabled = true;
+  resetSearchUI(); guide(null); railSet("a1rail", 1);
+  const nq = Number($("a1n").value) || 30;
+  $("a1status").innerHTML = `🔎 البحث التوافقي: توليد <b>${nq}</b> صورة ببذور مختلفة، حساب المتوسط في فضاء المتّجهات، ثم المطابقة مع المعرض…`;
+  try {
+    const result = await fetchSearch();
+    searchResult = result;
+    const canvases = await renderSearchFaces(result);
+    railSet("a1rail", 2);
+    await renderSearchComposite(result, canvases);
+    railSet("a1rail", 3);
+    renderSearchStats(result);
+    railSet("a1rail", 4);
+    await renderSearchLeads(result);
+    railSet("a1rail", 5); guide(studioModeButton());
+    const warning = result.warning ? `<br><span style="color:#fbbf24">${esc(result.warning)}</span>` : "";
+    $("a1status").innerHTML = result.real
+      ? `اكتمل البحث: <b>${fmt(result.gallery)}</b> وجهاً مرتّبة حسب نسبة التشابه. ساهم ${result.front_valid} تضميناً أمامياً.${warning}`
+      : `<b>بحث تجريبي فقط.</b> الواجهة تعرض بيانات الخادم، لكن لا يوجد فهرس FAISS حقيقي.${warning}`;
+  } catch (error) {
+    $("a1status").innerHTML = `<span style="color:#ff7b8b"><b>فشل البحث:</b> ${esc(error.message)}</span>`;
+    orbHint(); railSet("a1rail", 0);
+  } finally {
+    $("bigBtn").disabled = false; $("stepBtn").disabled = false;
+  }
+}
+
+async function stepSearch() {
+  if (searchStep?.busy) return;
+  if (!searchStep) {
+    resetSearchUI(); guide(null); $("stepBtn").disabled = true;
+    $("a1status").textContent = "يُشغَّل الخادم الحقيقي مرة واحدة؛ ثم يكشف الزر كل مرحلة على حدة.";
+    try {
+      const result = await fetchSearch();
+      searchResult = result;
+      searchStep = {stage: 0, busy: false, result, canvases: []};
+    } catch (error) {
+      $("a1status").innerHTML = `<span style="color:#ff7b8b"><b>فشل البحث:</b> ${esc(error.message)}</span>`;
+      searchStep = null;
+    } finally { $("stepBtn").disabled = false; }
+    if (!searchStep) return;
+  }
+  searchStep.busy = true;
+  try {
+    searchStep.stage += 1;
+    if (searchStep.stage === 1) {
+      railSet("a1rail", 1);
+      searchStep.canvases = await renderSearchFaces(searchStep.result);
+      $("a1status").innerHTML = `<b>الخطوة 1:</b> ${searchStep.result.faces.length} وجه استعلام مولّد من الخادم.`;
+    } else if (searchStep.stage === 2) {
+      railSet("a1rail", 2);
+      await renderSearchComposite(searchStep.result, searchStep.canvases);
+      $("a1status").innerHTML = "<b>الخطوة 2:</b> جرى حساب متوسط التضمينات؛ الصورة المركّبة المعروضة شرح بصري فقط.";
+    } else if (searchStep.stage === 3) {
+      railSet("a1rail", 3); renderSearchStats(searchStep.result);
+      $("a1status").innerHTML = `<b>الخطوة 3:</b> جرى البحث في ${fmt(searchStep.result.gallery)}؛ واحتُفظ بـ${fmt(searchStep.result.shortlist)}.`;
+    } else {
+      railSet("a1rail", 4); await renderSearchLeads(searchStep.result); railSet("a1rail", 5);
+      $("a1status").innerHTML = searchStep.result.real ? "<b>الخطوة 4:</b> عادت نتائج تشابه حقيقية مرتبة." : "<b>الخطوة 4:</b> نتائج تجريبية لأن المعرض غير متاح.";
+      searchStep = null; guide(studioModeButton());
+    }
+  } finally {
+    if (searchStep) {
+      searchStep.busy = false;
+      $("stepBtn").textContent = `▷ خطوة (${searchStep.stage}/4)`;
+    } else $("stepBtn").textContent = "▷ خطوة بخطوة";
+  }
+}
+$("stepBtn").onclick = stepSearch;
+
+/* =====================================================================
+   IDENTITY — actual images + actual ArcFace signatures
+===================================================================== */
+let current = {image: null, signature: null, locked: false};
+let locked = {image: null, signature: null};
+let history = [];
+let region = null;
+
+async function setCurrent(image, signature, label) {
+  current = {image, signature, locked: false};
+  locked = {image: null, signature: null};
+  await orbShowImage(image); ring(0);
+  history = [{image, signature, label}]; renderHistory();
+  $("rNum").textContent = ""; $("rCap").textContent = "الأساس جاهز — اقفل الهوية";
+  railSet("c2rail", 1); guide($("c2lock"));
+  resetSelectionForNewImage();
+}
+
+async function generateBase() {
+  if (mode !== "studio") setMode("studio");
+  if (!connected()) { $("c2status").textContent = "اتصل بالخادم أولاً."; return; }
+  const figure = $("c2figure").value.trim();
+  const prompt = $("c2prompt").value.trim();
+  if (!prompt) { $("c2status").textContent = "صِف الوجه الأساس أولاً."; return; }
+  $("bigBtn").disabled = true; $("c2status").textContent = "جارٍ توليد صورة أساس حقيقية واستخراج بصمة ArcFace…";
+  try {
+    const result = await api.post("/generate", {prompt, seed: 42, public_figure: figure || null, gender: segVal("c2gender", "data-g") || null, model: engineModel || undefined});
+    await setCurrent(result.image, result.signature, figure ? `يشبه ${figure}` : "الأساس");
+    $("c2status").innerHTML = result.mock ? "الأساس جاهز من <b>الخادم التجريبي</b>." : `الأساس جاهز عبر <b>${esc(result.model)}</b>. اقفل الهوية قبل التعديل.`;
+  } catch (error) {
+    $("c2status").innerHTML = `<span style="color:#ff7b8b"><b>فشل التوليد:</b> ${esc(error.message)}</span>`;
+  } finally { $("bigBtn").disabled = false; }
+}
+
+/* ---- public figure: scrape real web photos and use one as the editable base ---- */
+let figureCands = [];
+async function selectFigureCandidate(cand, idx) {
+  [...$("c2figcands").children].forEach((el, i) => el.classList.toggle("sel", i === idx));
+  const name = $("c2figure").value.trim();
+  await setCurrent(cand.image, cand.signature, name ? `صورة: ${name}` : "صورة مرجعية");
+  $("c2status").innerHTML = "صارت الصورة المرجعية هي الأساس. اضغط <b>قفل الهوية</b> لبدء التعديل.";
+}
+async function renderFigureCandidates(cands) {
+  figureCands = cands;
+  const box = $("c2figcands"); box.innerHTML = ""; box.style.display = "grid";
+  for (let i = 0; i < cands.length; i++) {
+    const cand = cands[i];
+    const cell = document.createElement("div"); cell.className = "fc";
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 128;
+    cell.appendChild(canvas);
+    if (cand.source) {
+      const src = document.createElement("div"); src.className = "src";
+      try { src.textContent = new URL(cand.source).hostname.replace(/^www\./, ""); }
+      catch (_) { src.textContent = "مصدر ويب"; }
+      cell.appendChild(src);
+    }
+    box.appendChild(cell);
+    await drawUrl(canvas, cand.image);
+    cell.onclick = () => selectFigureCandidate(cand, i);
+    setTimeout(() => cell.classList.add("show"), i * 30);
+  }
+}
+async function fetchFigure() {
+  if (mode !== "studio") setMode("studio");
+  const name = $("c2figure").value.trim();
+  if (!name) { $("c2status").textContent = "أدخل اسم الشخصية العامة أولاً."; return; }
+  if (!connected()) { $("c2status").textContent = "اتصل بالخادم أولاً."; return; }
+  const button = $("c2figfetch"); button.disabled = true;
+  const original = button.textContent; button.textContent = "⏳ جارٍ البحث…";
+  $("c2status").innerHTML = `جارٍ البحث عن صور عامة لـ<b>${esc(name)}</b> واكتشاف الوجوه فيها…`;
+  try {
+    const result = await api.post("/figure", {name, count: 6});
+    const cands = result.candidates || [];
+    if (!cands.length) throw new Error("لم تُسترجع أي صور صالحة.");
+    await renderFigureCandidates(cands);
+    await selectFigureCandidate(cands[0], 0);
+    if (result.note) { $("c2fignote").style.display = "block"; $("c2fignote").textContent = result.note; }
+    if (result.scraped && result.confident === false) {
+      $("c2status").innerHTML = `<span style="color:#fbbf24">${esc(result.note)}</span>`;
+    } else if (result.scraped) {
+      const extra = result.dropped ? ` (استُبعد ${result.dropped} وجه آخر ظهر في النتائج)` : "";
+      $("c2status").innerHTML = `وُجدت <b>${cands.length}</b> صورة لـ<b>${esc(name)}</b>${extra}. اختر واحدة ثم اقفل الهوية.`;
+    } else {
+      $("c2status").innerHTML = `<span style="color:#fbbf24">${esc(result.note || "جرى توليد شبيه تركيبي.")}</span>`;
+    }
+  } catch (error) {
+    $("c2status").innerHTML = `<span style="color:#ff7b8b"><b>فشل الجلب:</b> ${esc(error.message)}</span>`;
+  } finally {
+    button.disabled = false; button.textContent = original;
+  }
+}
+$("c2figfetch").onclick = fetchFigure;
+
+$("c2lock").onclick = async () => {
+  if (!current.image || !current.signature) { $("c2status").textContent = "ولّد أو ارفع وجهاً أساساً أولاً."; return; }
+  locked = {image: current.image, signature: [...current.signature]};
+  current.locked = true; ring(100);
+  $("rNum").textContent = "100%"; $("rCap").textContent = "بصمة الهوية مقفلة ومخزنة";
+  railSet("c2rail", 2); guide($("c2apply"));
+  $("c2status").innerHTML = "🔒 خُزنت بصمة ArcFace الفعلية (512 بُعداً). ستُقاس التعديلات مقابلها — ويمكنك حفظها في الخزنة أدناه.";
+};
+
+async function uploadAndSign(file) {
+  if (!connected()) throw new Error("اتصل بالخادم أولاً.");
+  const data = await fileToDataUrl(file);
+  const result = await api.post("/signature", {image: data});
+  await setCurrent(data, result.signature, "أساس مرفوع");
+  $("c2status").textContent = "اكتُشف الوجه المرفوع وضُمّن. اقفل الهوية قبل التعديل.";
+}
+$("c2basefile").onchange = async event => {
+  const file = event.target.files?.[0]; if (!file) return;
+  try { await uploadAndSign(file); }
+  catch (error) { $("c2status").innerHTML = `<span style="color:#ff7b8b">${esc(error.message)}</span>`; }
+  event.target.value = "";
+};
+
+/* =====================================================================
+   SELECTION — professional PAINTED MASK (brush + erase), plus smart-click that
+   fills a detected feature INTO the same mask for refinement.  The mask is a
+   real raster (any shape, any number of disjoint areas); it is exported to the
+   backend as a grayscale PNG (region = {mask_png}).  `region` stays null for
+   whole-face edits.
+===================================================================== */
+let selMode = "whole";          // "whole" | "brush" | "smart"
+let brushSub = "paint";         // "paint" | "erase"
+let brushSize = 26;             // in mask-canvas pixels (280-space)
+let landmarkRegions = [];
+const MASKN = 280;              // mask canvas resolution (matches the orb)
+const maskCv = document.createElement("canvas"); maskCv.width = maskCv.height = MASKN;
+const maskCtx = maskCv.getContext("2d");
+const selCv = $("selOverlay"), selCtx = selCv.getContext("2d");
+
+function maskHasPaint() {
+  const d = maskCtx.getImageData(0, 0, MASKN, MASKN).data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 10) return true;
+  return false;
+}
+function renderMaskOverlay() {
+  // Tint the painted mask orange onto the visible overlay above the face.
+  selCtx.clearRect(0, 0, selCv.width, selCv.height);
+  selCtx.save();
+  selCtx.drawImage(maskCv, 0, 0, selCv.width, selCv.height);
+  selCtx.globalCompositeOperation = "source-in";
+  selCtx.fillStyle = "rgba(245,165,36,.5)";
+  selCtx.fillRect(0, 0, selCv.width, selCv.height);
+  selCtx.restore();
+}
+function syncRegionFromMask() {
+  if (maskHasPaint()) {
+    // export mask as grayscale PNG (white where painted, on black)
+    const ex = document.createElement("canvas"); ex.width = ex.height = 256;
+    const ec = ex.getContext("2d");
+    ec.fillStyle = "#000"; ec.fillRect(0, 0, 256, 256);
+    ec.drawImage(maskCv, 0, 0, 256, 256);   // painted alpha stays white
+    region = {mask_png: ex.toDataURL("image/png")};
+    $("c2selClear").style.display = "inline-block"; $("c2clearsel").style.display = "inline-block";
+  } else {
+    region = null; $("c2clearsel").style.display = "none";
+  }
+  renderMaskOverlay();
+}
+function paintDab(nx, ny, erase) {
+  const px = nx * MASKN, py = ny * MASKN;
+  maskCtx.globalCompositeOperation = erase ? "destination-out" : "source-over";
+  maskCtx.fillStyle = "#fff";
+  maskCtx.beginPath(); maskCtx.arc(px, py, brushSize / 2, 0, Math.PI * 2); maskCtx.fill();
+  maskCtx.globalCompositeOperation = "source-over";
+}
+function fillFeatureIntoMask(poly) {
+  maskCtx.globalCompositeOperation = "source-over"; maskCtx.fillStyle = "#fff";
+  maskCtx.beginPath();
+  poly.forEach(([x, y], i) => { const px = x * MASKN, py = y * MASKN; i ? maskCtx.lineTo(px, py) : maskCtx.moveTo(px, py); });
+  maskCtx.closePath(); maskCtx.fill();
+}
+window.clearFaceRegion = () => {
+  maskCtx.clearRect(0, 0, MASKN, MASKN);
+  region = null; renderMaskOverlay();
+  $("c2selClear").style.display = "none"; $("c2clearsel").style.display = "none";
+  $("c2scope").textContent = selMode === "whole" ? "التعديل: كامل الوجه"
+    : selMode === "brush" ? "ارسم بالفرشاة على المناطق التي تريد تعديلها (يمكن اختيار عدة مناطق)"
+    : "انقر على ملمح لملء قناعه، ثم نقّح بالفرشاة إن أردت";
+};
+$("c2clearsel").onclick = () => window.clearFaceRegion();
+$("c2selClear").onclick = () => window.clearFaceRegion();
+$("c2brush").oninput = e => brushSize = Number(e.target.value);
+document.querySelectorAll("#c2brushSub button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#c2brushSub button").forEach(n => n.classList.remove("on"));
+  b.classList.add("on"); brushSub = b.dataset.b;
+});
+
+async function fetchLandmarks() {
+  landmarkRegions = [];
+  if (!connected() || !current.image) return;
+  try { landmarkRegions = (await api.post("/landmarks", {image: current.image})).regions || []; }
+  catch (_) { landmarkRegions = []; }
+}
+function resetSelectionForNewImage() {
+  if (window.clearFaceRegion) window.clearFaceRegion();
+  landmarkRegions = [];
+  if (selMode === "smart") fetchLandmarks();
+}
+
+document.querySelectorAll("#c2selMode button").forEach(btn => btn.onclick = async () => {
+  document.querySelectorAll("#c2selMode button").forEach(n => n.classList.remove("on"));
+  btn.classList.add("on"); selMode = btn.dataset.s;
+  $("c2brushBar").style.display = selMode === "whole" ? "none" : "flex";
+  $("orb").classList.toggle("painting", selMode !== "whole");
+  window.clearFaceRegion();
+  if (selMode === "smart") {
+    if (!current.image) { $("c2status").textContent = "ولّد أو استرجع وجهاً أولاً."; return; }
+    if (!landmarkRegions.length) await fetchLandmarks();
+    if (!landmarkRegions.length) $("c2scope").textContent = "لم تُكتشف ملامح — استخدم الفرشاة.";
+  }
+});
+
+function pointInPoly(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1], xj = poly[j][0], yj = poly[j][1];
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+/* pointer handling on the orb: brush = paint/erase; smart = click a feature */
+(() => {
+  const orb = $("orb");
+  let painting = false;
+  const norm = (event) => {
+    const rect = orb.getBoundingClientRect();
+    return [clamp((event.clientX - rect.left) / rect.width, 0, 1), clamp((event.clientY - rect.top) / rect.height, 0, 1)];
+  };
+  orb.addEventListener("pointerdown", event => {
+    if (mode !== "studio" || !current.image || selMode === "whole") return;
+    const [x, y] = norm(event);
+    if (selMode === "smart") {
+      let hit = landmarkRegions.find(r => pointInPoly(x, y, r.polygon));
+      if (!hit && landmarkRegions.length) {
+        let best = Infinity;
+        for (const r of landmarkRegions) {
+          const cx = r.polygon.reduce((s, p) => s + p[0], 0) / r.polygon.length;
+          const cy = r.polygon.reduce((s, p) => s + p[1], 0) / r.polygon.length;
+          const d = (cx - x) ** 2 + (cy - y) ** 2; if (d < best) { best = d; hit = r; }
+        }
+      }
+      if (hit) { fillFeatureIntoMask(hit.polygon); syncRegionFromMask(); $("c2scope").textContent = `مُحدَّد: ${hit.name} — نقّح بالفرشاة أو أضِف مناطق`; }
+      return;
+    }
+    // brush
+    painting = true; orb.setPointerCapture?.(event.pointerId);
+    paintDab(x, y, brushSub === "erase"); renderMaskOverlay();
+  });
+  orb.addEventListener("pointermove", event => {
+    if (!painting) return;
+    const [x, y] = norm(event);
+    paintDab(x, y, brushSub === "erase"); renderMaskOverlay();
+  });
+  const finish = () => { if (!painting) return; painting = false; syncRegionFromMask(); };
+  orb.addEventListener("pointerup", finish); orb.addEventListener("pointercancel", finish);
+})();
+
+async function showCompare(before, after) {
+  for (const id of ["cmpBefore", "cmpAfter"]) { $(id).width = 560; $(id).height = 280; }
+  await Promise.all([drawUrl($("cmpBefore"), before), drawUrl($("cmpAfter"), after)]);
+  $("c2compare").style.display = "block"; setSeam(50); $("cmpRange").value = 50;
+}
+function setSeam(value) {
+  const v = clamp(Number(value), 0, 100);
+  $("cmpBefore").style.clipPath = `inset(0 ${100 - v}% 0 0)`;
+  $("cmpAfter").style.clipPath = `inset(0 0 0 ${v}%)`;
+  $("cmpSeam").style.left = v + "%";
+}
+$("cmpRange").oninput = event => setSeam(event.target.value);
+
+async function applyEditOnce(seed = 0) {
+  if (!current.image) throw new Error("ولّد أو ارفع وجهاً أساساً أولاً.");
+  if (!locked.image || !locked.signature) throw new Error("اقفل الهوية أولاً.");
+  const result = await api.post("/edit", {
+    image: current.image,
+    instruction: $("c2edit").value.trim(),
+    ref: locked.image,
+    mode: "preserve",
+    seed,
+    anchor_signature: locked.signature,
+    mask: region,
+    model: engineModel || undefined,
+  });
+  return result;
+}
+
+$("c2apply").onclick = async () => {
+  $("c2apply").disabled = true; guide(null);
+  $("c2status").textContent = "جارٍ تنفيذ تعديل حقيقي بصورة مرجعية، ثم قياس تشابه ArcFace…";
+  try {
+    const before = current.image;
+    const result = await applyEditOnce(Date.now() % 2147483647);
+    current.image = result.image; current.signature = result.signature;
+    await orbShowImage(result.image); await showCompare(before, result.image);
+    resetSelectionForNewImage();
+    const score = Number(result.similarity);
+    ring(score * 100); $("rNum").textContent = `${Math.round(score * 100)}%`;
+    $("rCap").textContent = "تشابه ArcFace مع البصمة المقفلة";
+    history.push({image: result.image, signature: result.signature, label: `تعديل ${score.toFixed(3)}`}); renderHistory();
+    railSet("c2rail", 4);
+    const regionText = result.region_applied ? " البكسلات خارج المنطقة المحددة بقيت كما هي." : "";
+    $("c2status").innerHTML = `الحفاظ على الهوية: <b>${score.toFixed(3)}</b>.${regionText}`;
+  } catch (error) {
+    $("c2status").innerHTML = `<span style="color:#ff7b8b"><b>فشل التعديل:</b> ${esc(error.message)}</span>`;
+  } finally { $("c2apply").disabled = false; }
+};
+
+function renderHistory() {
+  const container = $("c2hist"); container.innerHTML = "";
+  history.forEach((item, index) => {
+    const wrapper = document.createElement("div"); wrapper.className = "h";
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 96;
+    const label = document.createElement("div"); label.className = "hl"; label.textContent = item.label;
+    if (index > 0) { const arrow = document.createElement("div"); arrow.className = "arrow"; arrow.textContent = "·"; wrapper.appendChild(arrow); }
+    wrapper.append(canvas, label); container.appendChild(wrapper);
+    drawUrl(canvas, item.image).then(() => setTimeout(() => wrapper.classList.add("show"), index * 45));
+    wrapper.onclick = async () => { current.image = item.image; current.signature = item.signature || current.signature; await orbShowImage(item.image); };
+  });
+  container.scrollLeft = -container.scrollWidth;
+}
+
+/* =====================================================================
+   QDRANT FACE VAULT — store & retrieve exact ArcFace signatures
+===================================================================== */
+async function useStoredFace(face) {
+  if (mode !== "studio") setMode("studio");
+  current = {image: face.image, signature: face.signature, locked: true};
+  locked = {image: face.image, signature: [...face.signature]};
+  await orbShowImage(face.image); ring(100);
+  $("rNum").textContent = "100%"; $("rCap").textContent = "بصمة مسترجَعة من الخزنة";
+  history = [{image: face.image, signature: face.signature, label: face.name ? `الخزنة: ${face.name}` : "من الخزنة"}];
+  renderHistory();
+  railSet("c2rail", 2); guide($("c2apply"));
+  resetSelectionForNewImage();
+  $("dbStatus").innerHTML = `استُرجع <b>${esc(face.name || "وجه بلا اسم")}</b> ببصمته الأصلية نفسها (512 بُعداً) — الهوية مقفلة وجاهزة للتعديل.`;
+}
+
+async function deleteStoredFace(face) {
+  try {
+    await api.post("/faces/delete", {id: face.id});
+    $("dbStatus").textContent = `حُذف «${face.name || face.id}» من الخزنة.`;
+    await loadFacesFromDb(true);
+  } catch (error) {
+    $("dbStatus").innerHTML = `<span style="color:#ff7b8b"><b>فشل الحذف:</b> ${esc(error.message)}</span>`;
+  }
+}
+
+function renderStoredFaces(faces, by) {
+  const box = $("dbFaces"); box.innerHTML = "";
+  if (!faces.length) { box.style.display = "none"; return; }
+  box.style.display = "grid";
+  faces.forEach((face, i) => {
+    const cell = document.createElement("div"); cell.className = "fc";
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 128;
+    cell.appendChild(canvas);
+    const src = document.createElement("div"); src.className = "src";
+    const when = face.created_at ? new Date(face.created_at * 1000).toLocaleDateString("ar") : "";
+    src.textContent = `${face.name || "بلا اسم"}${when ? " · " + when : ""}`;
+    cell.appendChild(src);
+    if (by === "similarity" && face.score != null) {
+      const badge = document.createElement("div"); badge.className = "score";
+      badge.textContent = Number(face.score).toFixed(3);
+      cell.appendChild(badge);
+    }
+    const del = document.createElement("div"); del.className = "del"; del.textContent = "×";
+    del.title = "حذف من الخزنة";
+    del.onclick = event => { event.stopPropagation(); deleteStoredFace(face); };
+    cell.appendChild(del);
+    box.appendChild(cell);
+    drawUrl(canvas, face.image);
+    cell.onclick = () => useStoredFace(face);
+    setTimeout(() => cell.classList.add("show"), i * 30);
+  });
+}
+
+async function saveFaceToDb() {
+  if (!connected()) { $("dbStatus").textContent = "اتصل بالخادم أولاً."; return; }
+  if (!current.image || !current.signature) { $("dbStatus").textContent = "ولّد أو ارفع وجهاً أولاً ليكون هناك ما يُحفظ."; return; }
+  const name = $("dbName").value.trim();
+  $("dbSave").disabled = true;
+  $("dbStatus").textContent = "جارٍ حفظ البصمة في قاعدة Qdrant…";
+  try {
+    const result = await api.post("/faces/store", {image: current.image, signature: current.signature, name});
+    $("dbStatus").innerHTML = `💾 حُفظ <b>${esc(result.name || "وجه بلا اسم")}</b> ببصمته الكاملة. إجمالي الوجوه المخزنة: <b>${fmt(result.count)}</b>.`;
+    $("dbName").value = "";
+    await loadFacesFromDb(true);
+  } catch (error) {
+    $("dbStatus").innerHTML = `<span style="color:#ff7b8b"><b>فشل الحفظ:</b> ${esc(error.message)}</span>`;
+  } finally { $("dbSave").disabled = false; }
+}
+
+async function loadFacesFromDb(quiet = false) {
+  if (!connected()) { $("dbStatus").textContent = "اتصل بالخادم أولاً."; return; }
+  $("dbLoad").disabled = true;
+  if (!quiet) $("dbStatus").textContent = "جارٍ الاسترجاع من قاعدة Qdrant…";
+  try {
+    const body = {limit: 12};
+    if (current.signature) body.signature = current.signature;
+    const result = await api.post("/faces/query", body);
+    renderStoredFaces(result.faces, result.by);
+    if (!quiet) {
+      $("dbStatus").innerHTML = result.faces.length
+        ? (result.by === "similarity"
+            ? `أقرب <b>${result.faces.length}</b> وجه إلى البصمة الحالية (مرتبة بتشابه الجيب التمام). انقر وجهاً لاسترجاع بصمته الأصلية.`
+            : `أحدث <b>${result.faces.length}</b> وجه مخزن. انقر وجهاً لاسترجاع بصمته الأصلية.`)
+        : "الخزنة فارغة — احفظ وجهاً أولاً.";
+    }
+  } catch (error) {
+    $("dbStatus").innerHTML = `<span style="color:#ff7b8b"><b>فشل الاسترجاع:</b> ${esc(error.message)}</span>`;
+  } finally { $("dbLoad").disabled = false; }
+}
+
+$("dbSave").onclick = saveFaceToDb;
+$("dbLoad").onclick = () => loadFacesFromDb(false);
+
+/* =====================================================================
+   VOICE
+===================================================================== */
+function blobToB64(blob) {
+  return new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(blob); });
+}
+/* Seamless dictation: words appear live as you speak, and the moment you stop
+   the description is submitted automatically (no button press). The browser's
+   own speech engine is used first (instant, no server round-trip); a recorder +
+   /transcribe fallback covers browsers without it. */
+function attachMic(micId, textareaId, onFinal) {
+  const button = $(micId);
+  const idle = '<span class="m"></span>🎤 تحدث';
+  const setIdle = () => { button.classList.remove("rec"); button.innerHTML = idle; };
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (SR) {
+    const SILENCE_MS = 1800;   // auto-submit after this much silence following speech
+    let recog = null, listening = false, finalText = "", submitted = false, silence = null;
+    const clearSilence = () => { if (silence) { clearTimeout(silence); silence = null; } };
+    button.onclick = () => {
+      if (listening) { clearSilence(); try { recog.stop(); } catch (_) {} return; }   // manual stop
+      finalText = ""; submitted = false;
+      recog = new SR();
+      recog.lang = "ar-SA";
+      recog.interimResults = true;   // show words AS they are spoken
+      recog.continuous = true;       // keep listening across pauses; we detect silence ourselves
+      recog.maxAlternatives = 1;
+      recog.onstart = () => { listening = true; button.classList.add("rec"); button.innerHTML = '<span class="m"></span>■ إيقاف'; };
+      recog.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (r.isFinal) finalText += r[0].transcript + " ";
+          else interim += r[0].transcript;
+        }
+        $(textareaId).value = (finalText + " " + interim).replace(/\s+/g, " ").trim();
+        // Every bit of speech resets the silence countdown; it fires only once you truly stop talking.
+        clearSilence();
+        silence = setTimeout(() => { try { recog.stop(); } catch (_) {} }, SILENCE_MS);
+      };
+      recog.onerror = (e) => {
+        clearSilence(); listening = false; setIdle();
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          button.textContent = "🎤 الميكروفون محجوب"; setTimeout(setIdle, 1800);
+        }
+      };
+      recog.onend = () => {
+        clearSilence(); listening = false; setIdle();
+        const text = ($(textareaId).value || finalText).trim();
+        if (text && !submitted) { submitted = true; $(textareaId).value = text; if (onFinal) onFinal(text); }
+      };
+      try { recog.start(); } catch (_) { setIdle(); }
+    };
+    return;
+  }
+
+  // Fallback: record -> backend /transcribe (needs FACELAB_ASR enabled), then auto-submit.
+  let recorder = null, chunks = [], stream = null;
+  button.onclick = async () => {
+    if (recorder?.state === "recording") { recorder.stop(); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); }
+    catch (_) { button.textContent = "🎤 الميكروفون محجوب"; setTimeout(setIdle, 1800); return; }
+    chunks = []; recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(track => track.stop()); button.classList.remove("rec"); button.innerHTML = '<span class="m"></span>⏳ …';
+      try {
+        const blob = new Blob(chunks, {type: chunks[0]?.type || "audio/webm"});
+        const result = await api.post("/transcribe", {audio: await blobToB64(blob), language: "ar"});
+        const text = result.text?.trim(); setIdle();
+        if (text) { $(textareaId).value = text; if (onFinal) onFinal(text); }
+      } catch (error) {
+        button.textContent = "🎤 فشل"; button.title = error.message;
+        setTimeout(setIdle, 1800);
+      }
+    };
+    recorder.start(); button.classList.add("rec"); button.innerHTML = '<span class="m"></span>■ إيقاف';
+  };
+}
+attachMic("a1mic", "a1prompt", () => { if (mode === "search") runSearch(); });
+
+/* =====================================================================
+   GENDER toggles + RECONSTRUCTION (partial/side/occluded) + CUSTOM GALLERY
+===================================================================== */
+function segVal(id, attr) { const el = $(id); const on = el && el.querySelector("button.on"); return on ? (on.getAttribute(attr) || "") : ""; }
+function wireSeg(id) {
+  const el = $(id); if (!el) return;
+  el.querySelectorAll("button").forEach(b => b.onclick = () => {
+    el.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+  });
+}
+wireSeg("a1gender"); wireSeg("c2gender");
+
+/* ---- reconstruction from a partial / side / occluded / masked photo ---- */
+let partialImage = null;
+$("c2partial").onchange = async event => {
+  const file = event.target.files?.[0]; if (!file) return; event.target.value = "";
+  try {
+    partialImage = await fileToDataUrl(file);
+    if (mode !== "studio") setMode("studio");
+    await orbShowImage(partialImage);
+    $("c2recon").disabled = false;
+    $("c2reconStatus").textContent = "الصورة جاهزة — اختر نوع التغطية ثم اضغط «أعِد البناء».";
+  } catch (_) { $("c2reconStatus").textContent = "تعذّر قراءة الصورة."; }
+};
+$("c2recon").onclick = async () => {
+  if (!partialImage) { $("c2reconStatus").textContent = "ارفع صورة جزئية أولاً."; return; }
+  if (!connected()) { $("c2reconStatus").textContent = "اتصل بالخادم أولاً."; return; }
+  if (mode !== "studio") setMode("studio");
+  const btn = $("c2recon"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ جارٍ البناء…";
+  $("c2reconStatus").textContent = "جارٍ إعادة بناء وجه أمامي كامل من الصورة الناقصة (قد يأخذ ثوانٍ)…";
+  try {
+    const result = await api.post("/reconstruct", {
+      image: partialImage,
+      occlusion: $("c2occ").value || null,
+      mirror: $("c2mirror").checked,
+      use_faceid: $("c2faceid").checked,
+      gender: segVal("c2gender", "data-g") || null,
+      model: engineModel || undefined,
+    });
+    await setCurrent(result.image, result.signature, "وجه معاد بناؤه");
+    const via = result.method === "faceid" ? "توليد من متجه غير مكتمل" : "تحرير مع حفظ الهوية";
+    $("c2reconStatus").innerHTML = `✔ أُعيد بناء وجه أمامي كامل عبر <b>${via}</b> واستُخرجت بصمته. اقفل الهوية أو انتقل للبحث به.`;
+  } catch (error) {
+    $("c2reconStatus").innerHTML = `<span style="color:#ff7b8b">فشل البناء: ${esc(error.message)}</span>`;
+  } finally { btn.disabled = false; btn.textContent = orig; }
+};
+
+/* ---- blend up to 10 photos of one person into a robust identity (paper idea) ---- */
+let blendFiles = [];
+$("c2blendfiles").onchange = event => {
+  blendFiles = Array.from(event.target.files || []).slice(0, 10);
+  $("c2blendCount").textContent = blendFiles.length ? `${blendFiles.length} صورة مختارة` : "";
+  $("c2blend").disabled = blendFiles.length === 0;
+};
+$("c2blend").onclick = async () => {
+  if (!blendFiles.length) { $("c2blendStatus").textContent = "اختر صوراً أولاً."; return; }
+  if (!connected()) { $("c2blendStatus").textContent = "اتصل بالخادم أولاً."; return; }
+  if (mode !== "studio") setMode("studio");
+  const btn = $("c2blend"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ جارٍ الدمج…";
+  $("c2blendStatus").textContent = "جارٍ استخراج بصمة كل صورة وأخذ متوسّطها…";
+  try {
+    const images = [];
+    for (const f of blendFiles) images.push(await fileToDataUrl(f));
+    const result = await api.post("/blend_identity", {
+      images,
+      reconstruct: $("c2blendRecon").checked,
+      gender: segVal("c2gender", "data-g") || null,
+      model: engineModel || undefined,
+    });
+    await setCurrent(result.image, result.signature, `هوية مدموجة (${result.used})`);
+    const via = result.method === "faceid" ? " وولّد وجهاً أمامياً كاملاً من البصمة" : "";
+    $("c2blendStatus").innerHTML = `✔ دُمجت <b>${result.used}</b> صورة في بصمة هوية واحدة${via}. اقفلها أو انتقل للبحث بها.`;
+  } catch (error) {
+    $("c2blendStatus").innerHTML = `<span style="color:#ff7b8b">فشل الدمج: ${esc(error.message)}</span>`;
+  } finally { btn.disabled = false; btn.textContent = orig; }
+};
+
+/* ---- custom search gallery: build from zip/folder + switch active gallery ---- */
+async function refreshGalleries() {
+  if (!connected()) return;
+  try {
+    const g = await api.request("/gallery/list");
+    const sel = $("a1gallery"); if (!sel) return;
+    sel.innerHTML = "";
+    (g.galleries || []).forEach(it => {
+      const o = document.createElement("option");
+      o.value = it.name; o.textContent = `${it.label} (${fmt(it.count)})`;
+      if (it.name === g.active) o.selected = true;
+      sel.appendChild(o);
+    });
+    const act = (g.galleries || []).find(x => x.name === g.active);
+    $("a1galCount").textContent = act ? `— نشطة: ${fmt(act.count)} وجه` : "";
+  } catch (_) {}
+}
+$("a1gallery").onchange = async event => {
+  try {
+    const r = await api.post("/gallery/activate", {name: event.target.value});
+    $("a1galstatus").innerHTML = `✔ فُعّلت القاعدة (${fmt(r.count)} وجه). شغّل البحث التوافقي عليها.`;
+    await refreshGalleries();
+  } catch (error) { $("a1galstatus").innerHTML = `<span style="color:#ff7b8b">${esc(error.message)}</span>`; }
+};
+$("a1galRefresh").onclick = refreshGalleries;
+
+let galPoll = null;
+async function pollGalleryBuild() {
+  try {
+    const s = await api.request("/gallery/status");
+    const b = s.build || {};
+    if (b.active) {
+      $("a1galprog").style.display = "block";
+      const pct = b.total ? Math.round(100 * b.done / b.total) : 0;
+      $("a1galbar").style.width = pct + "%";
+      let line = `جارٍ البناء: ${fmt(b.done)}/${fmt(b.total)} صورة — وجوه مكتشفة: ${fmt(b.kept)}`;
+      const extra = [];
+      if (b.rate) extra.push(`${b.rate.toFixed(1)} صورة/ث`);
+      if (b.eta != null && b.eta > 0) extra.push(`المتبقّي ≈ ${fmtEta(b.eta)}`);
+      if (extra.length) line += ` · ${extra.join(" · ")}`;
+      $("a1galstatus").textContent = line;
+    } else {
+      if (galPoll) { clearInterval(galPoll); galPoll = null; }
+      $("a1galprog").style.display = "none";
+      if (b.error) $("a1galstatus").innerHTML = `<span style="color:#ff7b8b">فشل البناء: ${esc(b.error)}</span>`;
+      else if (b.finished) $("a1galstatus").innerHTML = `✔ اكتملت القاعدة «${esc(b.name || "")}» بـ<b>${fmt(b.kept)}</b> وجه وفُعّلت. شغّل البحث الآن.`;
+      await refreshGalleries();
+    }
+  } catch (_) { if (galPoll) { clearInterval(galPoll); galPoll = null; } }
+}
+async function startGalleryBuild() {
+  if (!connected()) { $("a1galstatus").textContent = "اتصل بالخادم أولاً."; return; }
+  const name = $("a1galname").value.trim();
+  const path = $("a1galpath").value.trim();
+  const file = $("a1galzip").files?.[0];
+  if (!file && !path) { $("a1galstatus").textContent = "ارفع ملف zip أو أدخل مسار مجلد على الخادم."; return; }
+  $("a1galbuild").disabled = true;
+  try {
+    if (file) {
+      $("a1galstatus").textContent = "جارٍ رفع الأرشيف إلى الخادم…";
+      const data = await fileToDataUrl(file);
+      await api.post("/gallery/build_zip", {zip: data, name: name || file.name.replace(/\.zip$/i, ""), thumb: 200});
+    } else {
+      await api.post("/gallery/build_path", {path, name: name || "", thumb: 200});
+    }
+    $("a1galzip").value = "";
+    if (galPoll) clearInterval(galPoll);
+    galPoll = setInterval(pollGalleryBuild, 1500); pollGalleryBuild();
+  } catch (error) {
+    $("a1galstatus").innerHTML = `<span style="color:#ff7b8b">${esc(error.message)}</span>`;
+  } finally { $("a1galbuild").disabled = false; }
+}
+$("a1galbuild").onclick = startGalleryBuild;
+attachMic("c2mic", "c2prompt", () => { if (mode !== "search") generateBase(); });
+
+/* =====================================================================
+   BOOT
+===================================================================== */
+window.addEventListener("resize", resizeFx);
+requestAnimationFrame(async () => {
+  resizeFx(); seedAmbient(); animateFx(); orbHint(); ring(0); setMode("search");
+  const defaultBase = location.protocol === "http:" || location.protocol === "https:" ? location.origin : "";
+  if (defaultBase) await connectBackend(defaultBase, true);
+});
+
+</script>
+</body>
+</html>

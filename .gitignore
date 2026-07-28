@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Data & model artifacts (never commit large binaries)
+data/
+face_pipeline_index/
+model_server/models/
+mugshots/
+hf_cache/
+qdrant_*/
+gallery_thumbs/
+*.index
+*.npy
+*.gguf
+*.bin
+
+# Secrets / local config
+.env
+
+# Build artifacts
+*.zip
+*.tar
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

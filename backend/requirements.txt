@@ -1,0 +1,32 @@
+# Web/API
+fastapi>=0.115
+uvicorn[standard]>=0.34
+pydantic>=2.8
+pillow>=10.4
+numpy>=1.26
+
+# FLUX.2 and model runtime
+# Install diffusers from GitHub separately in Colab for the newest FLUX.2 classes.
+transformers>=5.4.0
+accelerate>=1.2
+huggingface_hub>=0.27
+bitsandbytes>=0.45
+sentencepiece
+protobuf
+
+# Face embeddings and retrieval
+insightface>=0.7.3
+onnxruntime-gpu==1.20.1
+faiss-cpu>=1.9
+kagglehub>=0.3
+
+# Face signature vault (vector database)
+qdrant-client>=1.12
+
+# Audio
+soundfile>=0.12
+librosa>=0.10
+
+# Public-figure reference scraping (name -> real web photos)
+ddgs
+requests>=2.31
