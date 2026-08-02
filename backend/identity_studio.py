@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+import providers
+
 def _cuda_available() -> bool:
     if os.environ.get("FACELAB_MOCK", "0") == "1":
         return False
@@ -23,7 +25,24 @@ def _cuda_available() -> bool:
     except Exception:
         return False
 
-MOCK = not _cuda_available()
+# Remote FLUX server (the lab machine's app.py). When set, all diffusion runs
+# there over HTTP and no local CUDA is needed for generation/editing.
+REMOTE_URL = os.environ.get("FLUX_API_URL", "").strip().rstrip("/")
+
+# Which back end draws the pixels: "fal" (FLUX.2 [dev] on fal.ai, needs
+# internet), "openrouter" (hosted models, needs internet), "lab" (the FLUX.2
+# server at FLUX_API_URL, works offline), or "local" (a diffusers pipeline in
+# this process). See providers.resolve_provider.
+PROVIDER = providers.resolve_provider()
+if PROVIDER == "lab" and not REMOTE_URL:
+    # Asked for the lab route without saying where the server is; assume the
+    # published port on the container host, same as docker-compose.yml.
+    REMOTE_URL = "http://host.docker.internal:8000"
+
+# Mock is the last resort: no hosted route, no lab server, and no local CUDA.
+MOCK = PROVIDER == "local" and not _cuda_available()
+if os.environ.get("FACELAB_MOCK", "0") == "1":
+    MOCK = True
 
 @dataclass(frozen=True)
 class ModelDefaults:
@@ -35,8 +54,14 @@ class IdentityStudio:
     """Reusable generation, editing, and ArcFace engine."""
 
     def __init__(self) -> None:
-        requested = os.environ.get("FACELAB_IMAGE_MODEL", "klein").strip().lower()
-        self.model_kind = "dev" if requested == "dev" else "klein"
+        requested = os.environ.get("FACELAB_IMAGE_MODEL", "").strip().lower()
+        # klein is the cheap default everywhere except fal, where the default
+        # endpoint already *is* FLUX.2 [dev] — defaulting to klein there would
+        # quietly route the UI to the fallback model. Explicit setting wins.
+        self.model_kind = (
+            requested if requested in ("dev", "klein")
+            else ("dev" if PROVIDER == "fal" else "klein")
+        )
         self.model_id = (
             os.environ.get("FACELAB_DEV_MODEL", "diffusers/FLUX.2-dev-bnb-4bit")
             if self.model_kind == "dev"
@@ -47,6 +72,40 @@ class IdentityStudio:
             if self.model_kind == "dev"
             else ModelDefaults(steps=4, guidance=1.0, min_size=512)
         )
+        self.provider = "mock" if MOCK else PROVIDER
+        # Every hosted route reads as "remote" to backend.py, which gates its
+        # per-request `model` override on ENGINE.remote.
+        self.remote = self.provider in ("fal", "openrouter", "lab")
+        self.api_url = REMOTE_URL if self.provider == "lab" else providers.base_url()
+        if self.provider == "fal":
+            import fal_provider
+
+            # FLUX.2 [dev] on fal takes full-step settings; klein 9B is distilled
+            # to 4 and ignores guidance, which fal_provider trims per endpoint.
+            self.defaults = ModelDefaults(steps=28, guidance=2.5, min_size=512)
+            self.model_id = fal_provider.edit_models()[0]
+            self.api_url = fal_provider.SYNC_URL
+        elif self.provider == "lab":
+            # The lab server's klein is 9B-KV, not the 4-step-distilled klein-4B,
+            # so remote generation uses full-step defaults for both model kinds.
+            self.defaults = ModelDefaults(steps=28, guidance=4.0, min_size=512)
+            self.model_id = f"{REMOTE_URL} ({self.model_kind})"
+        elif self.provider == "openrouter":
+            # steps/guidance/seed have no equivalent on OpenRouter's image
+            # endpoint — they are accepted and ignored on this route.
+            self.defaults = ModelDefaults(steps=28, guidance=4.0, min_size=512)
+            self.model_id = providers.image_model()
+        try:
+            self._remote_timeout = float(os.environ.get("FLUX_API_TIMEOUT", "900"))
+        except Exception:
+            self._remote_timeout = 900.0
+        if self.provider == "openrouter":
+            self._remote_timeout = providers.timeout()
+        elif self.provider == "fal":
+            import fal_provider
+
+            self._remote_timeout = fal_provider.timeout()
+        self._remote_max_refs: int | None = None
         self._pipe: Any | None = None
         self._face: Any | None = None
         self._fill: Any | None = None
@@ -59,13 +118,34 @@ class IdentityStudio:
     def status(self) -> dict[str, Any]:
         status: dict[str, Any] = {
             "mock": MOCK,
-            "engine": "mock" if MOCK else "local",
+            "engine": "mock" if MOCK else ("remote" if self.remote else "local"),
+            "provider": self.provider,
             "image_model": "mock" if MOCK else self.model_id,
             "model_kind": "mock" if MOCK else self.model_kind,
+            # The UI's dev/klein switch syncs off this; without it the switch
+            # falls back to klein regardless of what the route actually runs.
+            "remote_model": self.model_kind if self.remote else None,
             "image_model_loaded": self._pipe is not None,
             "arcface_loaded": self._face is not None,
         }
-        if not MOCK:
+        if self.provider == "fal":
+            import fal_provider
+
+            status["device"] = "remote"
+            status["fal"] = fal_provider.health()
+        elif self.provider == "openrouter":
+            status["device"] = "remote"
+            status["openrouter"] = {
+                "base_url": providers.base_url(),
+                "image_model": providers.image_model(),
+                "edit_model": providers.edit_model(),
+                "key_present": bool(providers.api_key()),
+                "spend": providers.spend(),
+            }
+        elif self.remote:
+            status["remote_api"] = self.api_url
+            status["device"] = "remote"
+        elif not MOCK:
             try:
                 import torch
 
@@ -91,9 +171,190 @@ class IdentityStudio:
             except Exception:
                 pass
 
+    def remote_health(self, timeout: float = 5.0) -> dict[str, Any]:
+        """Reachability of whichever remote route is active (raises when unreachable)."""
+        if self.provider == "fal":
+            import fal_provider
+
+            return fal_provider.health()
+        if self.provider == "openrouter":
+            return providers.health()
+        import requests
+
+        response = requests.get(f"{self.api_url}/health", timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def _remote_ref_limit(self) -> int:
+        """How many reference images the active route accepts per request.
+        app_v2.py advertises multi_ref/max_refs in /health; app.py takes one."""
+        if self.provider == "fal":
+            import fal_provider
+
+            return fal_provider.MAX_REFS
+        if self.provider == "openrouter":
+            return providers.ref_limit()
+        if self._remote_max_refs is None:
+            try:
+                health = self.remote_health()
+                self._remote_max_refs = (
+                    int(health.get("max_refs", 1)) if health.get("multi_ref") else 1
+                )
+            except Exception:
+                self._remote_max_refs = 1
+        return self._remote_max_refs
+
+    def _remote_call(
+        self,
+        prompt: str,
+        *,
+        images: list[Image.Image] | None = None,
+        model: str | None = None,
+        width: int = 768,
+        height: int = 768,
+        steps: int | None = None,
+        guidance: float | None = None,
+        seed: int = 0,
+    ) -> Image.Image:
+        """One image from whichever remote route is active."""
+        if self.provider == "fal":
+            return self._fal_call(
+                prompt, images=images, model=model, width=width, height=height,
+                steps=steps, guidance=guidance, seed=seed, count=1,
+            )[0]
+        if self.provider == "openrouter":
+            return self._openrouter_call(
+                prompt, images=images, model=model, width=width, height=height, count=1
+            )[0]
+        return self._flux_call(
+            prompt, images=images, model=model, width=width, height=height,
+            steps=steps, guidance=guidance, seed=seed,
+        )
+
+    def _fal_call(
+        self,
+        prompt: str,
+        *,
+        images: list[Image.Image] | None = None,
+        model: str | None = None,
+        width: int = 768,
+        height: int = 768,
+        steps: int | None = None,
+        guidance: float | None = None,
+        seed: int = 0,
+        count: int = 1,
+    ) -> list[Image.Image]:
+        """``count`` images from fal.ai — the edit endpoint when references are
+        attached, the text-to-image endpoint otherwise."""
+        import fal_provider
+
+        refs = list(images or [])
+        width, height = fal_provider.fit_size(width, height)
+        kwargs: dict[str, Any] = dict(
+            width=width, height=height, count=count, seed=int(seed),
+            steps=steps, guidance=guidance, model=model or self.model_kind,
+            request_timeout=self._remote_timeout,
+        )
+        if refs:
+            out, _slug = fal_provider.edit_images(prompt, refs, **kwargs)
+        else:
+            out, _slug = fal_provider.generate_images(prompt, **kwargs)
+        return out
+
+    @staticmethod
+    def _openrouter_slug(model: str | None) -> str | None:
+        """The UI sends 'dev'/'klein', which mean nothing to OpenRouter. Only pass
+        a model through when it looks like a real slug ('vendor/name')."""
+        model = (model or "").strip()
+        return model if "/" in model else None
+
+    def _openrouter_call(
+        self,
+        prompt: str,
+        *,
+        images: list[Image.Image] | None = None,
+        model: str | None = None,
+        width: int = 768,
+        height: int = 768,
+        count: int = 1,
+    ) -> list[Image.Image]:
+        """``count`` images from OpenRouter. steps/guidance/seed do not apply here."""
+        return providers.generate_images(
+            prompt,
+            count=count,
+            width=width,
+            height=height,
+            references=list(images or []) or None,
+            model=self._openrouter_slug(model),
+            request_timeout=self._remote_timeout,
+        )
+
+    def _flux_call(
+        self,
+        prompt: str,
+        *,
+        images: list[Image.Image] | None = None,
+        model: str | None = None,
+        width: int = 768,
+        height: int = 768,
+        steps: int | None = None,
+        guidance: float | None = None,
+        seed: int = 0,
+    ) -> Image.Image:
+        """One /generate request against the lab FLUX server; returns the PIL image."""
+        import requests
+
+        model = (model or self.model_kind).strip().lower()
+        if model not in ("dev", "klein"):
+            raise ValueError("model must be 'dev' or 'klein'.")
+        steps = max(1, min(50, int(steps or self.defaults.steps)))
+        guidance = float(self.defaults.guidance if guidance is None else guidance)
+        fields: list[tuple[str, tuple]] = [
+            ("model", (None, model)),
+            ("prompt", (None, prompt)),
+            ("width", (None, str(int(width)))),
+            ("height", (None, str(int(height)))),
+            ("steps", (None, str(steps))),
+            ("guidance", (None, str(guidance))),
+            ("seed", (None, str(int(seed)))),
+        ]
+        refs = list(images or [])
+        limit = self._remote_ref_limit()
+        if len(refs) > limit:
+            print(
+                f"[remote-flux] server accepts {limit} reference image(s); "
+                f"dropping {len(refs) - limit} extra (run app_v2.py for multi-reference edits)",
+                flush=True,
+            )
+            refs = refs[:limit]
+        for index, ref in enumerate(refs):
+            buffer = io.BytesIO()
+            ref.convert("RGB").save(buffer, "PNG")
+            fields.append(("image", (f"ref_{index}.png", buffer.getvalue(), "image/png")))
+        try:
+            response = requests.post(
+                f"{self.api_url}/generate", files=fields, timeout=self._remote_timeout
+            )
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"FLUX server unreachable at {self.api_url} - is app.py running on the "
+                "lab machine, and is this machine on the lab network?"
+            ) from exc
+        if response.status_code != 200:
+            try:
+                detail = response.json().get("detail", response.text[:300])
+            except Exception:
+                detail = response.text[:300]
+            raise RuntimeError(f"FLUX server error {response.status_code}: {detail}")
+        return Image.open(io.BytesIO(response.content)).convert("RGB")
+
     def _get_pipe(self):
         if MOCK:
             raise RuntimeError("The diffusion pipeline is unavailable in mock mode.")
+        if self.remote:
+            raise RuntimeError(
+                "Local pipeline disabled: generation is delegated to FLUX_API_URL."
+            )
         with self._model_lock:
             if self._pipe is not None:
                 return self._pipe
@@ -224,12 +485,19 @@ class IdentityStudio:
         seed: int = 42,
         width: int = 768,
         height: int = 768,
+        model: str | None = None,
     ) -> Image.Image:
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("A non-empty face description is required.")
         if MOCK:
             return _mock_portrait(prompt, seed)
+        if self.remote:
+            width, height = self._aligned_size(width, height, self.defaults.min_size)
+            return self._remote_call(
+                prompt, model=model, width=width, height=height,
+                steps=steps, guidance=guidance, seed=int(seed),
+            )
 
         import torch
 
@@ -260,16 +528,41 @@ class IdentityStudio:
         base_seed: int = 0,
         width: int = 640,
         height: int = 640,
+        model: str | None = None,
     ) -> list[Image.Image]:
 
 
-       
+
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("A non-empty face description is required.")
         count = max(1, int(count))
         if MOCK:
             return [_mock_portrait(prompt, base_seed + i) for i in range(count)]
+        if self.provider == "fal":
+            # fal renders num_images in one request, so the burst is one call.
+            width, height = self._aligned_size(width, height, self.defaults.min_size)
+            return self._fal_call(
+                prompt, model=model, width=width, height=height,
+                steps=steps, guidance=guidance, seed=int(base_seed), count=count,
+            )
+        if self.provider == "openrouter":
+            # Batch in one request per 10 images rather than `count` round trips.
+            # There is no seed here, so the spread the burst-average relies on
+            # comes from sampling variation instead of distinct seeds.
+            width, height = self._aligned_size(width, height, self.defaults.min_size)
+            return self._openrouter_call(
+                prompt, model=model, width=width, height=height, count=count
+            )
+        if self.remote:
+            width, height = self._aligned_size(width, height, self.defaults.min_size)
+            return [
+                self._remote_call(
+                    prompt, model=model, width=width, height=height,
+                    steps=steps, guidance=guidance, seed=int(base_seed + i),
+                )
+                for i in range(count)
+            ]
 
         import torch
 
@@ -402,7 +695,7 @@ class IdentityStudio:
         Klein is already 4-step distilled; only the heavy dev model is capped.
         This is the main time saver for region edits."""
         steps = max(1, int(steps))
-        if self.model_kind == "dev":
+        if self.model_kind == "dev" or self.remote:
             try:
                 cap = int(os.environ.get("FACELAB_REGION_STEPS", "8"))
             except Exception:
@@ -414,7 +707,7 @@ class IdentityStudio:
         """Optional dedicated inpaint pipeline. Loaded ONLY if FACELAB_FILL_MODEL is
         set (e.g. a FLUX Fill checkpoint). Off by default because it adds a model
         download and VRAM; the default crop-edit path needs no second model."""
-        if MOCK:
+        if MOCK or self.remote:
             return None
         model = os.environ.get("FACELAB_FILL_MODEL", "").strip()
         if not model:
@@ -560,8 +853,9 @@ class IdentityStudio:
         guidance: float | None = None,
         seed: int = 0,
         mask: dict[str, float] | None = None,
+        model: str | None = None,
     ) -> Image.Image:
-        
+
         if current is None:
             raise ValueError("A current image is required.")
         mode = mode.lower().strip()
@@ -581,9 +875,10 @@ class IdentityStudio:
                 return self._composite_region(current, edited, box, alpha_full)
             return edited
 
-        import torch
+        if not self.remote:
+            import torch
 
-        pipe = self._get_pipe()
+            pipe = self._get_pipe()
         steps = int(steps or self.defaults.steps)
         guidance = float(self.defaults.guidance if guidance is None else guidance)
         instruction = (instruction or "").strip() or "make a subtle natural edit"
@@ -642,19 +937,114 @@ class IdentityStudio:
             with self._model_lock, torch.inference_mode():
                 return pipe(**kwargs).images[0].convert("RGB")
 
-        primary = edit_images if self.model_kind == "klein" else [edit_images]
-        fallback = [edit_images] if self.model_kind == "klein" else edit_images
-        try:
-            out = run(primary)
-        except Exception as exc:
-            if "match number of prompts" in str(exc):
-                out = run(fallback)
-            else:
-                raise
+        if self.remote:
+            out = self._remote_call(
+                prompt,
+                images=edit_images,
+                model=model,
+                width=width,
+                height=height,
+                steps=self._region_steps(steps) if region_edit else steps,
+                guidance=guidance,
+                seed=int(seed),
+            )
+        else:
+            primary = edit_images if self.model_kind == "klein" else [edit_images]
+            fallback = [edit_images] if self.model_kind == "klein" else edit_images
+            try:
+                out = run(primary)
+            except Exception as exc:
+                if "match number of prompts" in str(exc):
+                    out = run(fallback)
+                else:
+                    raise
 
         if region_edit:
             return self._composite_region(current, out, context_box, alpha_full)
         return out.resize(current.size, Image.Resampling.LANCZOS)
+
+    def render_edit(
+        self,
+        images: list[Image.Image],
+        prompt: str,
+        *,
+        width: int,
+        height: int,
+        seed: int = 0,
+        steps: int | None = None,
+        guidance: float | None = None,
+        model: str | None = None,
+    ) -> tuple[Image.Image, dict[str, Any]]:
+        """A raw reference-conditioned render, with no prompt scaffolding.
+
+        ``edit`` wraps the caller's instruction in identity-preservation
+        boilerplate and crops to a mask, which is right for studio edits and
+        wrong for half-face completion: that one needs its own carefully worded
+        prompt to survive verbatim and the canvas geometry to come back
+        unchanged, or the seam moves. Returns the image plus what rendered it.
+        """
+        images = [im.convert("RGB") for im in (images or []) if im is not None]
+        if not images:
+            raise ValueError("At least one reference image is required.")
+        prompt = (prompt or "").strip()
+        if not prompt:
+            raise ValueError("A non-empty prompt is required.")
+        width, height = max(1, int(width)), max(1, int(height))
+
+        if MOCK:
+            # No renderer available: hand the canvas straight back. Callers still
+            # get a valid (if unimproved) result, which keeps offline tests honest.
+            return images[0].resize((width, height), Image.Resampling.LANCZOS), {
+                "provider": "mock", "model": "mock", "render_size": [width, height]
+            }
+
+        if self.provider == "fal":
+            import fal_provider
+
+            w, h = fal_provider.fit_size(width, height)
+            out, slug = fal_provider.edit_images(
+                prompt, images, width=w, height=h, seed=int(seed),
+                steps=steps or self.defaults.steps,
+                guidance=self.defaults.guidance if guidance is None else guidance,
+                model=model, request_timeout=self._remote_timeout,
+            )
+            return out[0], {"provider": "fal", "model": slug, "render_size": [w, h]}
+
+        if self.remote:
+            w, h = self._aligned_size(width, height, self.defaults.min_size)
+            out = self._remote_call(
+                prompt, images=images, model=model, width=w, height=h,
+                steps=steps, guidance=guidance, seed=int(seed),
+            )
+            return out, {"provider": self.provider, "model": self.model_id, "render_size": [w, h]}
+
+        import torch
+
+        pipe = self._get_pipe()
+        w, h = self._aligned_size(width, height, self.defaults.min_size)
+        kwargs: dict[str, Any] = dict(
+            prompt=prompt,
+            width=w,
+            height=h,
+            num_inference_steps=int(steps or self.defaults.steps),
+            guidance_scale=float(self.defaults.guidance if guidance is None else guidance),
+            generator=torch.Generator(device="cuda").manual_seed(int(seed)),
+        )
+        if self.model_kind == "dev":
+            kwargs["caption_upsample_temperature"] = 0.15
+
+        def run(pipe_images: list) -> Image.Image:
+            with self._model_lock, torch.inference_mode():
+                return pipe(image=pipe_images, **kwargs).images[0].convert("RGB")
+
+        primary = images if self.model_kind == "klein" else [images]
+        try:
+            out = run(primary)
+        except Exception as exc:
+            if "match number of prompts" not in str(exc):
+                raise
+            out = run([images] if self.model_kind == "klein" else images)
+        return out, {"provider": "local", "model": self.model_id, "render_size": [w, h]}
 
 def _match_crop_tone(
     edited_crop: Image.Image,

@@ -126,6 +126,13 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
 .lead .t{position:absolute;left:0;right:0;bottom:0;background:#000b;color:#cbd5e1;font-size:9px;padding:2px 4px;direction:ltr;text-align:left}
 .tgt{border-top:1px dashed var(--line);margin-top:13px;padding-top:11px}
 .hintline{font-size:11.5px;color:var(--a2);margin-top:6px}
+/* ---- half-face candidate picker ---- */
+.candGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-top:10px}
+.candCard{position:relative;border-radius:12px;overflow:hidden;border:2px solid #2a3245;cursor:pointer;background:#0d1017;transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.candCard:hover{transform:translateY(-2px) scale(1.02);border-color:#4a5878;box-shadow:0 8px 20px rgba(0,0,0,.5)}
+.candCard.sel{border-color:#e8a33d;box-shadow:0 0 0 2px rgba(232,163,61,.35),0 8px 20px rgba(0,0,0,.5)}
+.candCard img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.candPick{position:absolute;top:6px;right:6px;background:rgba(232,163,61,.92);color:#1a1204;font-weight:800;font-size:10px;padding:2px 7px;border-radius:999px}
 .compare{position:relative;margin-top:13px;border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:2/1;display:none;direction:ltr}
 .compare canvas{position:absolute;top:0;left:0;height:100%;width:100%;object-fit:cover}
 .compare .seam{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 12px #fff;left:50%}
@@ -380,6 +387,23 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
             <button class="btn a2" id="c2recon" style="padding:8px 14px" disabled>✨ أعِد البناء</button>
           </div>
           <div class="hintline" id="c2reconStatus">للجانبي أو نصف الوجه المغطى: ارفع الصورة، اختر نوع التغطية، ثم أعِد البناء لوجه أمامي كامل يصلح للتعديل والبحث.</div>
+        </div>
+        <div class="reconBox">
+          <div class="galHead">🪞 نصف وجه ← وجه كامل <span class="galCount">— النصف الذي ترفعه يعود كما هو بكسل ببكسل</span></div>
+          <div class="reconRow">
+            <label class="filePick" style="margin:0">⬆ نصف صورة<input id="c2halffile" type="file" accept="image/*"></label>
+            <select id="c2halfSide" class="galSel">
+              <option value="">الجهة: تلقائي</option>
+              <option value="left">النصف الأيسر هو المتوفر</option>
+              <option value="right">النصف الأيمن هو المتوفر</option>
+              <option value="top">النصف العلوي هو المتوفر</option>
+              <option value="bottom">النصف السفلي هو المتوفر</option>
+            </select>
+            <label class="mirrorChk" title="ارفع صورة كاملة، ويقصّها الخادم بنفسه ثم يقارن النتيجة بالأصل"><input type="checkbox" id="c2halfCut"> صورة كاملة — اقطعها واختبر</label>
+            <button class="btn a2" id="c2half" style="padding:8px 14px" disabled>🪞 أكمل الوجه</button>
+          </div>
+          <div class="hintline" id="c2halfStatus"></div>
+          <div id="c2halfCands" class="candGrid" style="display:none"></div>
         </div>
         <div class="reconBox">
           <div class="galHead">🧬 ادمج حتى ١٠ صور لنفس الشخص — هوية أقوى</div>
@@ -1516,6 +1540,110 @@ $("c2recon").onclick = async () => {
     $("c2reconStatus").innerHTML = `✔ أُعيد بناء وجه أمامي كامل عبر <b>${via}</b> واستُخرجت بصمته. اقفل الهوية أو انتقل للبحث به.`;
   } catch (error) {
     $("c2reconStatus").innerHTML = `<span style="color:#ff7b8b">فشل البناء: ${esc(error.message)}</span>`;
+  } finally { btn.disabled = false; btn.textContent = orig; }
+};
+
+/* ---- half face -> whole face, with the supplied half preserved pixel for pixel ---- */
+let halfImage = null;
+
+/* All frontalization candidates, best first, as a clickable gallery: the star
+   marks the automatic ArcFace pick, and one click adopts any other candidate. */
+function renderHalfCandidates(result) {
+  const grid = $("c2halfCands");
+  grid.innerHTML = "";
+  const cands = (result.candidates || []).slice().sort((a, b) => (b.sim_profile ?? -1) - (a.sim_profile ?? -1));
+  if (cands.length < 2) { grid.style.display = "none"; return; }
+  grid.style.display = "grid";
+  cands.forEach(c => {
+    const card = document.createElement("div");
+    card.className = "candCard" + (c.picked ? " sel" : "");
+    card.innerHTML =
+      `<img src="${c.image}" alt="">` +
+      (c.picked ? '<div class="candPick">⭐ الاختيار التلقائي</div>' : "");
+    card.title = c.picked
+      ? "الأعلى تشابهاً مع صورتك الجانبية — معتمد تلقائياً"
+      : "اضغط لاعتماد هذا المرشح بدل الاختيار التلقائي";
+    card.onclick = async () => {
+      grid.querySelectorAll(".candCard").forEach(x => x.classList.remove("sel"));
+      card.classList.add("sel");
+      let signature = null;
+      try { signature = (await api.post("/signature", {image: c.image})).signature; } catch (_) {}
+      await setCurrent(c.image, signature, "مرشح مختار");
+      $("c2halfStatus").innerHTML =
+        `<b style="color:var(--good)">✔ اعتمدتَ هذا المرشح.</b> اقفل الهوية أو انتقل للبحث به.`;
+    };
+    grid.appendChild(card);
+  });
+}
+
+$("c2halffile").onchange = async event => {
+  const file = event.target.files?.[0]; if (!file) return; event.target.value = "";
+  try {
+    halfImage = await fileToDataUrl(file);
+    if (mode !== "studio") setMode("studio");
+    await orbShowImage(halfImage);
+    $("c2half").disabled = false;
+    $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
+    $("c2halfStatus").textContent = "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
+  } catch (_) { $("c2halfStatus").textContent = "تعذّر قراءة الصورة."; }
+};
+$("c2half").onclick = async () => {
+  if (!halfImage) { $("c2halfStatus").textContent = "ارفع صورة نصف وجه أولاً."; return; }
+  if (!connected()) { $("c2halfStatus").textContent = "اتصل بالخادم أولاً."; return; }
+  if (mode !== "studio") setMode("studio");
+  const btn = $("c2half"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ جارٍ الإكمال…";
+  $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
+  $("c2halfStatus").textContent =
+    "جارٍ الإكمال… نصف أمامي: توليد واحد (~دقيقة). صورة جانبية: عدة مرشحين يُرتَّبون بالبصمة (قد يستغرق دقائق).";
+  try {
+    const side = $("c2halfSide").value || null;
+    const body = {image: halfImage, gender: segVal("c2gender", "data-g") || null, model: engineModel || undefined};
+    // The cut-and-test path needs to know which half to keep; auto has no meaning there.
+    if ($("c2halfCut").checked) body.take = side || "left"; else body.side = side;
+    const result = await api.post("/half_face", body);
+    const label = result.method === "frontalized" ? "وجه أمامي من صورة جانبية" : "وجه مكتمل من نصف";
+    await setCurrent(result.image, result.signature, label);
+
+    if (result.method === "frontalized") {
+      // The upload was a side-profile photo, not half of a frontal picture —
+      // the server rendered several frontal candidates and ranked them by
+      // ArcFace similarity to the profile. All of them are shown below; the
+      // user's eye gets the final word.
+      const bits = [];
+      const sim = result.identity?.vs_supplied_half;
+      if (sim != null) bits.push(`تشابه البصمة مع الصورة الجانبية ${(sim * 100).toFixed(1)}%`);
+      const tried = (result.candidates || []).length;
+      if (tried > 1) bits.push(`أفضل نتيجة من ${tried} مرشحين`);
+      bits.push(`${result.render?.model || ""} · ${result.seconds}ث`);
+      $("c2halfStatus").innerHTML =
+        `<b style="color:var(--good)">✔ الصورة المرفوعة جانبية (بروفايل) — وُلِّد وجه أمامي كامل لنفس الشخص.</b>` +
+        `<br><span style="color:#7f8ca3">${esc(bits.join(" · "))}</span>` +
+        ((result.candidates || []).length > 1
+          ? `<br>👇 <b>كل المرشحين بالأسفل</b> — ⭐ هو الاختيار التلقائي، واضغط أي مرشح آخر لاعتماده إن كان أقرب للوجه الحقيقي بعينك.`
+          : "");
+      renderHalfCandidates(result);
+      return;
+    }
+    if (result.method === "already-complete") {
+      $("c2halfStatus").innerHTML =
+        `<b style="color:var(--good)">✔ الصورة المرفوعة وجه أمامي كامل أصلاً — لا يوجد نصف ناقص لإكماله، أُعيدت كما هي.</b>`;
+      return;
+    }
+
+    const g = result.geometry || {};
+    const sideLabel = {left: "الأيسر", right: "الأيمن", top: "العلوي", bottom: "السفلي"}[g.side] || g.side;
+    const exact = result.pixel_exact
+      ? `<b style="color:var(--good)">✔ النصف ${sideLabel} الذي رفعته مطابق للأصل بكسلاً بكسل</b>`
+      : `<b style="color:#ff7b8b">⚠ تعذّر ضمان التطابق البكسلي</b>`;
+    const bits = [`المقاس ${g.width}×${g.height}`, `الوصلة ${result.seam_step}`];
+    const sim = result.identity?.vs_supplied_half;
+    if (sim != null) bits.push(`تشابه البصمة ${sim.toFixed(3)}`);
+    if (result.accuracy) bits.push(`مقابل الأصل PSNR ${result.accuracy.generated_half_psnr} dB`);
+    if (result.identity?.vs_reference != null) bits.push(`مطابقة الأصل ${result.identity.vs_reference.toFixed(3)}`);
+    bits.push(`${result.render?.model || ""} · ${result.seconds}ث`);
+    $("c2halfStatus").innerHTML = `${exact}<br><span style="color:#7f8ca3">${esc(bits.join(" · "))}</span>`;
+  } catch (error) {
+    $("c2halfStatus").innerHTML = `<span style="color:#ff7b8b">فشل الإكمال: ${esc(error.message)}</span>`;
   } finally { btn.disabled = false; btn.textContent = orig; }
 };
 

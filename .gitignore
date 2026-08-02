@@ -34,3 +34,6 @@ Thumbs.db
 
 # Local cleanup staging (never commit)
 _to_delete/
+
+# Personal test photos (real faces) — keep out of public repos
+half photo/

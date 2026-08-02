@@ -39,8 +39,46 @@ KLEIN_REPO = "black-forest-labs/FLUX.2-klein-4B"
 GGUF_URL = ("https://huggingface.co/unsloth/FLUX.2-klein-4B-GGUF/"
             "blob/main/flux-2-klein-4b-Q4_K_S.gguf")
 
+# When FLUX_API_URL is set, generation is delegated to the lab FLUX server
+# (app.py on the Jupyter machine) instead of loading a local pipeline.
+FLUX_API_URL = os.environ.get("FLUX_API_URL", "").strip().rstrip("/")
+
+# Generation route, shared with identity_studio: "openrouter" (hosted models),
+# "lab" (the FLUX server above), or "local" (diffusers in this process).
+def _provider() -> str:
+    import providers
+
+    return providers.resolve_provider()
+
 _PIPE = None
 _FACE_APP = None
+
+def _lab_url() -> str:
+    """Where the lab FLUX server lives; same default as identity_studio."""
+    return FLUX_API_URL or "http://host.docker.internal:8000"
+
+def _remote_generate(prompt, width, height, steps, seed, model=None, timeout=None):
+    """One image from the remote FLUX server; mirrors curl -F fields."""
+    import io
+    import requests
+    from PIL import Image
+
+    response = requests.post(
+        f"{_lab_url()}/generate",
+        files={
+            "model": (None, model or os.environ.get("FLUX_REMOTE_MODEL", "klein")),
+            "prompt": (None, prompt),
+            "width": (None, str(int(width))),
+            "height": (None, str(int(height))),
+            "steps": (None, str(int(steps))),
+            "seed": (None, str(int(seed))),
+        },
+        timeout=timeout or float(os.environ.get("FLUX_API_TIMEOUT", "900")),
+    )
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"FLUX server error {response.status_code}: {response.text[:300]}")
+    return Image.open(io.BytesIO(response.content)).convert("RGB")
 
 def _get_pipe():
     """Load the official FLUX.2 Klein 4B pipeline once."""
@@ -86,6 +124,35 @@ def _embed_largest_face(app, rgb_image):
 def generate_faces(prompt: str, n: int = 30, height: int = 1024, width: int = 1024,
                    steps: int = 4, base_seed: int = 0, save_dir: str | None = None):
     """Burst-generate n images for the same prompt with distinct random seeds."""
+    route = _provider()
+    if route == "openrouter":
+        import providers
+
+        # No seed on this route: the spread reduce_to_query averages over comes
+        # from sampling variation, so base_seed only labels the saved files.
+        images = providers.generate_images(
+            prompt, count=n, width=width, height=height
+        )
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+            for i, img in enumerate(images):
+                img.save(os.path.join(save_dir, f"face_{i:03d}.png"))
+        return images
+
+    if route == "lab":
+        # The remote klein (9B-KV) is not 4-step distilled like the local klein-4B,
+        # so lift the local default step count unless the caller overrode it.
+        if steps == 4:
+            steps = int(os.environ.get("FLUX_REMOTE_STEPS", "28"))
+        images = []
+        for i in range(n):
+            img = _remote_generate(prompt, width, height, steps, base_seed + i)
+            images.append(img)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
+                img.save(os.path.join(save_dir, f"face_{i:03d}_seed{base_seed + i}.png"))
+        return images
+
     import torch
     pipe = _get_pipe()
     images = []
