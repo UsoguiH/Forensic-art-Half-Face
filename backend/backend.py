@@ -1043,10 +1043,9 @@ class HalfFaceReq(BaseModel):
     align_scale: float = Field(default=0.08, ge=0.0, le=0.3)
     identity_anchor: bool = True
     reference: str | None = None
-    # Frontalization route only (profile uploads): how many candidate renders
-    # to rank by ArcFace similarity, and whether to run the refinement edit
-    # (off by default — measured to repaint identity away; see frontalize.py).
-    candidates: int = Field(default=6, ge=1, le=8)
+    # Frontalization route only (profile uploads): total candidate pool, split
+    # across the two prompt styles (see faceid_reconstruct2). 8 = 4 seeds x 2.
+    candidates: int = Field(default=8, ge=1, le=8)
     refine: bool = False
 
 def _mirror_fill(img: Image.Image, occlusion: str | None) -> Image.Image:
@@ -1194,11 +1193,11 @@ def _frontalize_profile(
     truth: Image.Image | None = None,
 ) -> dict[str, Any]:
     """A side-profile photo is a complete head, not half of a frontal portrait —
-    mirroring it builds a two-faced canvas. Run the frontalization pipeline
-    instead: several candidates, ArcFace-ranked against the profile, plus an
-    identity-refinement pass. No pixel of the result can be guaranteed, so
-    ``pixel_exact`` is honestly False here."""
-    import frontalize as fz
+    mirroring it builds a two-faced canvas. Run the identity-first reconstruction
+    instead (faceid_reconstruct2): a prompt-diverse candidate pool ranked against
+    the fused profile+mirror identity. No pixel of the result can be guaranteed,
+    so ``pixel_exact`` is honestly False here."""
+    import faceid_reconstruct2 as f2
 
     render = _half_face_renderer(req, low_guidance=False)
 
@@ -1208,12 +1207,14 @@ def _frontalize_profile(
             with MODEL_LOCK:
                 return ENGINE.signature(img)
 
-    result = fz.frontalize(
+    # ``candidates`` counts the whole pool; it is split across the two prompt
+    # styles (descriptive studio + scene-preserving) measured in the battery.
+    per_style = max(1, req.candidates // 2)
+    result = f2.reconstruct(
         image,
         renderer=render,
         embed=embed,
-        seeds=fz.DEFAULT_SEEDS[: max(1, req.candidates)],
-        refine=req.refine,
+        seeds=f2.DEFAULT_SEEDS[:per_style],
         who=_gender_phrase(req.gender).rstrip(", "),
         extra_prompt=req.prompt or "",
     )
