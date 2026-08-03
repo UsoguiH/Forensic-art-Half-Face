@@ -1047,6 +1047,10 @@ class HalfFaceReq(BaseModel):
     # across the two prompt styles (see faceid_reconstruct2). 8 = 4 seeds x 2.
     candidates: int = Field(default=8, ge=1, le=8)
     refine: bool = False
+    # MORE photos of the SAME person (other frames, other sessions): the
+    # strongest identity lever measured. They become extra tight-crop
+    # references and their embeddings fuse into the ranking anchor.
+    extra_images: list[str] = Field(default_factory=list, max_length=6)
 
 def _mirror_fill(img: Image.Image, occlusion: str | None) -> Image.Image:
     """Crude symmetric pre-fill: reflect the visible half over the vertical
@@ -1196,6 +1200,8 @@ def _gated_pick(
     metas: list[dict[str, Any]],
     images: list[Image.Image],
     detector,
+    embed=None,
+    anchor: "np.ndarray | None" = None,
 ) -> "tuple[int, list[dict[str, Any]]]":
     """Re-rank a candidate pool with the scope-battery gates applied.
 
@@ -1217,13 +1223,23 @@ def _gated_pick(
         gated = front < _MIN_FRONTALITY or (
             score is not None and score > f2.SUSPICIOUS_SIMILARITY
         )
-        annotated.append({**meta, "frontality": front, "gated": gated})
+        sim_fused = None
+        if anchor is not None and embed is not None:
+            v = embed(img)
+            if v is not None:
+                v = np.asarray(v, dtype=np.float32).reshape(-1)
+                sim_fused = round(float(np.dot(v, anchor)), 4)
+        annotated.append({**meta, "frontality": front, "gated": gated, "sim_fused": sim_fused})
     pool = [i for i, c in enumerate(annotated) if not c["gated"]] or list(range(len(annotated)))
-    best = max(
-        pool,
-        key=lambda i: annotated[i]["rank_score"] if annotated[i]["rank_score"] is not None else -1.0,
-    )
-    return best, annotated
+    # With a fused multi-photo anchor, rank against it (variance-reduced);
+    # otherwise fall back to the single-photo min-both rank_score.
+    if anchor is not None:
+        key = lambda i: (annotated[i]["sim_fused"]
+                         if annotated[i]["sim_fused"] is not None else -1.0)  # noqa: E731
+    else:
+        key = lambda i: (annotated[i]["rank_score"]
+                         if annotated[i]["rank_score"] is not None else -1.0)  # noqa: E731
+    return max(pool, key=key), annotated
 
 
 def _frontalize_profile(
@@ -1263,6 +1279,20 @@ def _frontalize_profile(
     if face is not None:
         working, crop_meta = face_crop.head_shoulders_crop(image, face.bbox[:4])
 
+    # ---- extra photos of the same person: evidence, not decoration ----------
+    # Each becomes a tight face crop (density beats count — a pile of scene
+    # crops measurably DILUTED identity) and joins the fused ranking anchor.
+    extra_tights: list[Image.Image] = []
+    if req.extra_images and detector is not None:
+        for data_url in req.extra_images:
+            try:
+                extra = from_data_url(data_url)
+            except Exception:
+                continue
+            f = face_crop.biggest_face(detector(extra) or [])
+            if f is not None:
+                extra_tights.append(face_crop.tight_face_crop(extra, f.bbox[:4]))
+
     face_px = 0.0
     if face is not None:
         fx0, fy0, fx1, fy1 = (float(v) for v in face.bbox[:4])
@@ -1281,6 +1311,31 @@ def _frontalize_profile(
         if age:
             traits = f"About {int(age)} years old."
 
+    # ---- multi-photo: references + fused ranking anchor ---------------------
+    references = None
+    styles = ("descriptive", "idportrait")
+    fused_anchor = None
+    if extra_tights:
+        references = [working] + extra_tights[:3]
+        if len(references) < 3:
+            references.append(ImageOps.mirror(working))
+        styles = ("multiref", "multirefstudio")
+        if embed is not None:
+            tight0 = (
+                face_crop.tight_face_crop(image, face.bbox[:4])
+                if face is not None else working
+            )
+            anchors = []
+            for t in [tight0] + extra_tights:
+                for view in (t, ImageOps.mirror(t)):
+                    v = embed(view)
+                    if v is not None:
+                        anchors.append(np.asarray(v, dtype=np.float32).reshape(-1))
+            if anchors:
+                m = np.mean(np.stack(anchors), axis=0)
+                n = float(np.linalg.norm(m))
+                fused_anchor = m / n if n > 0 else None
+
     # ---- base pool: styles measured best on the scope battery ---------------
     per_style = max(1, req.candidates // 2)
     result = f2.reconstruct(
@@ -1288,15 +1343,16 @@ def _frontalize_profile(
         renderer=render,
         embed=embed,
         seeds=f2.DEFAULT_SEEDS[:per_style],
-        prompt_styles=("descriptive", "idportrait"),
+        prompt_styles=styles,
         who=who,
         traits=traits,
         extra_prompt=req.prompt or "",
         out_size=(832, 1216),
+        references=references,
     )
     metas = [dict(c, round="base") for c in result["candidates"]]
     images = list(result["candidate_images"])
-    best, annotated = _gated_pick(metas, images, detector)
+    best, annotated = _gated_pick(metas, images, detector, embed=embed, anchor=fused_anchor)
 
     # ---- enrichment round: CCTV tier only -----------------------------------
     enriched = False
@@ -1307,6 +1363,10 @@ def _frontalize_profile(
             "the same person; correct any facial feature that differs so everything matches "
             "the first two photographs exactly."
         ).strip()
+        base_refs = (
+            references[:3] if references
+            else [working, ImageOps.mirror(working)]
+        )
         second = f2.reconstruct(
             working,
             renderer=render,
@@ -1317,7 +1377,7 @@ def _frontalize_profile(
             traits=traits,
             extra_prompt=enrich_extra,
             out_size=(832, 1216),
-            references=[working, ImageOps.mirror(working), draft],
+            references=base_refs + [draft],
         )
         # The enriched pick REPLACES the base pick whenever it survives the
         # gates. Never compare base and enriched by similarity-to-profile:
@@ -1329,6 +1389,8 @@ def _frontalize_profile(
             [dict(c, round="enrich") for c in second["candidates"]],
             list(second["candidate_images"]),
             detector,
+            embed=embed,
+            anchor=fused_anchor,
         )
         if not e_annotated[e_best]["gated"]:
             offset = len(metas)
@@ -1372,6 +1434,7 @@ def _frontalize_profile(
         "pose": pose,
         "normalize": crop_meta,
         "tier": "evidence-poor" if evidence_poor else "evidence-rich",
+        "n_extra_photos": len(extra_tights),
         "enriched": enriched,
         "stage": picked["stage"],
         "seed_used": picked["seed"],

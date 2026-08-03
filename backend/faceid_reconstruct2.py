@@ -125,6 +125,61 @@ def idportrait2_prompt(who: str = "", traits: str = "") -> str:
     )
 
 
+def multiref_prompt(who: str = "", traits: str = "") -> str:
+    """ID-portrait commission over SEVERAL photos of the same person.
+
+    The single-photo prompts say "both photos" (photo + mirror). When the
+    evidence is genuinely different photographs — other sessions, other
+    cameras, other angles — saying so matters: the model is invited to
+    triangulate the face from independent views instead of treating the
+    extras as decoration. Multi-photo evidence measured as the strongest
+    identity lever in the research sweep; this is its prompt.
+    """
+    person, their, they_are = {
+        "a man": ("man", "his", "He is"),
+        "a woman": ("woman", "her", "She is"),
+    }.get((who or "").strip().lower(), ("person", "their", "They are"))
+    traits = f" {traits.strip()}" if (traits or "").strip() else ""
+    return (
+        f"Every photo shows the same {person}, photographed on different occasions and from "
+        f"different angles, always from the side. Study all of them together: each view "
+        f"reveals part of {their} true face, and every feature they agree on is real. "
+        f"Now {they_are.lower()} posing for an official identification portrait: facing the "
+        "camera directly, head level and upright, both eyes open and looking straight into "
+        "the lens, neutral expression. Head-and-shoulders framing against a plain light-gray "
+        "studio backdrop with soft, even, frontal lighting and no facial shadows. "
+        f"{their.capitalize()} face must be the one face consistent with every source photo — "
+        "the same eyebrows, the same eyes, the same nose, the same lips, the same facial "
+        "hair, the same jawline, the same skin tone and texture, the same hairline and "
+        f"haircut — and {they_are.lower()} wearing the same clothing as in the first photo. "
+        "Photorealistic, sharp focus across the entire face, true to life, no "
+        f"beautification, no makeup, no smoothing.{traits}"
+    )
+
+
+def multirefstudio_prompt(who: str = "", traits: str = "") -> str:
+    """Descriptive-studio phrasing of the multi-photo commission — the second
+    style in the multi-photo pool, mirroring how descriptive/idportrait split
+    wins in the single-photo battery."""
+    person, their, they_are = {
+        "a man": ("man", "his", "He is"),
+        "a woman": ("woman", "her", "She is"),
+    }.get((who or "").strip().lower(), ("person", "their", "They are"))
+    traits = f" {traits.strip()}" if (traits or "").strip() else ""
+    return (
+        f"These photographs all show one {person} seen from the side, taken at different "
+        f"times and places. {they_are} now facing the camera directly in a studio, both "
+        "eyes looking straight into the lens, neutral expression, plain light-gray "
+        "backdrop. Realistic documentary photography with true-to-life features and "
+        "natural skin texture. Soft, even, frontal lighting with no facial shadows. "
+        "Camera at eye level, head-and-shoulders framing, sharp focus across the entire "
+        f"face. {their.capitalize()} face, hair and clothing are identical to the source "
+        "photographs — the same eyebrows, the same eyes, the same nose, the same lips, "
+        "the same facial hair, the same jawline, the same hairline and haircut, the same "
+        f"clothing as the first photo.{traits}"
+    )
+
+
 def preserving_prompt(who: str = "", traits: str = "") -> str:
     """Scene-preserving instruction. Keeps the original background, clothing and
     light — for photos whose identity lives in their context (distinctive
@@ -180,6 +235,8 @@ def reconstruct(
         "preserving": preserving_prompt(who, traits),
         "idportrait": idportrait_prompt(who, traits),
         "idportrait2": idportrait2_prompt(who, traits),
+        "multiref": multiref_prompt(who, traits),
+        "multirefstudio": multirefstudio_prompt(who, traits),
     }
     extra = (extra_prompt or "").strip()
     # Default refs: the photo and its mirror ("both sides of the head").  A

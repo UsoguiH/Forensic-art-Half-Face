@@ -216,6 +216,33 @@ survivors → if face < 200 px: enrichment round replaces pick (when its own
 gated pick survives) → all candidates + tier + enriched flag to the UI;
 sex auto-injected, age only when face ≥ 200 px.
 
+## 5c. v4 — the 0.75 push: multi-photo fusion + the measured ceiling (2026-08-03)
+
+Identity clustering over every available photo found MULTI-PHOTO SUBJECTS:
+young cluster = young1/3/6/7/8 + clean_profile + near_cctv (7 photos, one
+person); man cluster = man1/2/3; old cluster = old1/old3; nawaf = 1 photo.
+
+Measured over 3 more rounds (~30 renders):
+- Multi-photo references: a pile of scene crops DILUTES identity (man2 4-ref
+  run fell to 0.28-0.30); density wins — primary head-shoulders crop + other
+  photos as TIGHT face crops ("hs+tight"), ≤3-4 refs, multiref prompt styles.
+- Fused quality-weighted anchor (all photos + mirrors) for ranking: picked
+  the ORACLE on every multi-photo run. Wired into backend (`extra_images`).
+- young8 with 3-photo evidence: pick = oracle = 0.5171 (single-photo best
+  0.5127).
+- THE CEILING MEASUREMENT that settles the 0.75 question: the AI reference
+  targets themselves agree with the subjects' full photo evidence at only
+  tgt_young8 = 0.527 (fused 5 photos), tgt_man2 = 0.366 (fused 3 photos).
+  Our picks sit at 98% of young8's ceiling and ABOVE man2's. Scores beyond
+  the ceiling measure agreement with the target-generator's hallucinations,
+  not identity — 0.75 against these targets is mathematically unreachable
+  for any honest reconstruction. On the real-truth benchmark (whatsapp),
+  pools of 4/8/12 gave 0.6055/0.6329/0.6329 = saturation at the profile's
+  own 0.630 anchor; single-profile information is exhausted.
+- What a real 0.75 requires: REAL frontal ground-truth targets (retire the
+  AI panels) and/or richer per-subject evidence (frames spanning genuinely
+  different angles). The pipeline is ready for both (extra_images API).
+
 ## 6. Measurement protocol
 
 Three buckets, one config must win across all (no per-domain tuning):
