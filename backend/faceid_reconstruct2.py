@@ -63,6 +63,68 @@ def descriptive_prompt(who: str = "", traits: str = "") -> str:
     )
 
 
+def idportrait_prompt(who: str = "", traits: str = "") -> str:
+    """Scene-to-studio commission for far/surveillance shots.
+
+    The scene-preserving prompt is actively wrong for these: it keeps the
+    corridor.  This one commissions the deliverable itself — a studio ID
+    portrait — while pinning everything identity-bearing to the source photos,
+    clothing and headwear included (the collar and ghutra carry identity too).
+    It also has to fight two poses at once: yaw (turn to camera) and the
+    lowered gaze common in candid frames (head level, eyes into the lens).
+    """
+    person, their, they_are = {
+        "a man": ("man", "his", "He is"),
+        "a woman": ("woman", "her", "She is"),
+    }.get((who or "").strip().lower(), ("person", "their", "They are"))
+    traits = f" {traits.strip()}" if (traits or "").strip() else ""
+    return (
+        f"Both photos show the same {person}, photographed candidly from the side. "
+        f"Now {they_are.lower()} posing for an official identification portrait: facing the "
+        "camera directly, head level and upright, both eyes open and looking straight into "
+        "the lens, neutral expression. Head-and-shoulders framing against a plain light-gray "
+        "studio backdrop with soft, even, frontal lighting and no facial shadows. "
+        f"{their.capitalize()} face is exactly the face in the source photos — the same "
+        "eyebrows, the same eyes, the same nose, the same lips, the same facial hair, the "
+        "same jawline, the same skin tone and texture, the same hairline and haircut — and "
+        f"{they_are.lower()} wearing exactly the same clothing and any headwear from the "
+        "source photos. Sharp focus across the entire face, true to life, no beautification, "
+        f"no makeup, no smoothing.{traits}"
+    )
+
+
+def idportrait2_prompt(who: str = "", traits: str = "") -> str:
+    """idportrait with the feature anchors spelled out one by one.
+
+    Round-3 review found the failures are always *specific*: a face rendered
+    slightly wider than the person's, a distinctive nose flattened to average,
+    an age drifted younger. Generic "same face" phrasing lets the model fall
+    back to its priors on exactly those axes, so this variant names each axis
+    and pins it to the source. A/B'd against idportrait, never edited in place.
+    """
+    person, their, they_are = {
+        "a man": ("man", "his", "He is"),
+        "a woman": ("woman", "her", "She is"),
+    }.get((who or "").strip().lower(), ("person", "their", "They are"))
+    traits = f" {traits.strip()}" if (traits or "").strip() else ""
+    return (
+        f"Both photos show the same {person}, photographed candidly from the side. "
+        f"Now {they_are.lower()} posing for an official identification portrait: facing the "
+        "camera directly, head level and upright, both eyes open and looking straight into "
+        "the lens, neutral expression. Head-and-shoulders framing against a plain light-gray "
+        "studio backdrop with soft, even, frontal lighting. This must be the real person "
+        "exactly as they are in the source photos, not an idealized version: the same exact "
+        "head shape and face width, the same cheek fullness and jawline, the same distinctive "
+        "nose with the same bridge and tip shape seen in the side view, the same eyebrow "
+        "thickness, the same eye shape and eyelids, the same lips, the same skin tone and "
+        "texture with any moles or marks kept, the same apparent age and weight, the same "
+        "facial hair in the same pattern and density, the same hairline, hair length, hair "
+        f"texture and haircut. {they_are} wearing exactly the same clothing and any headwear "
+        "from the source photos. Photorealistic, sharp focus across the entire face, no "
+        f"beautification, no makeup, no smoothing, no de-aging.{traits}"
+    )
+
+
 def preserving_prompt(who: str = "", traits: str = "") -> str:
     """Scene-preserving instruction. Keeps the original background, clothing and
     light — for photos whose identity lives in their context (distinctive
@@ -92,14 +154,20 @@ def reconstruct(
     who: str = "",
     traits: str = "",
     extra_prompt: str = "",
+    out_size: "tuple[int, int] | None" = None,
+    references: "list[Image.Image] | None" = None,
 ) -> dict[str, Any]:
     """Best-effort identical-identity frontal from one profile photo.
 
     Renders len(seeds) x len(prompt_styles) candidates and returns the one
     closest to the fused identity. Without ``embed`` (mock mode), renders one.
+
+    ``out_size`` decouples the render from the input: a far shot arrives at
+    scene size, but the deliverable is a portrait — rendering AT the scene size
+    was spending the pixels on the background. Default keeps the old behaviour.
     """
     profile = profile.convert("RGB")
-    width, height = profile.size
+    width, height = out_size or profile.size
     started = time.time()
 
     fused, v_profile, v_mirror = extract_identity(profile, embed)
@@ -110,9 +178,15 @@ def reconstruct(
     prompts = {
         "descriptive": descriptive_prompt(who, traits),
         "preserving": preserving_prompt(who, traits),
+        "idportrait": idportrait_prompt(who, traits),
+        "idportrait2": idportrait2_prompt(who, traits),
     }
     extra = (extra_prompt or "").strip()
-    references = [profile, ImageOps.mirror(profile)]
+    # Default refs: the photo and its mirror ("both sides of the head").  A
+    # caller can hand in richer evidence instead — e.g. a tight face crop plus
+    # the head-and-shoulders crop, so more of the reference pixels are face.
+    if references is None:
+        references = [profile, ImageOps.mirror(profile)]
 
     candidates: list[dict[str, Any]] = []
     best: dict[str, Any] | None = None
