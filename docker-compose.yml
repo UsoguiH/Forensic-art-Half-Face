@@ -46,12 +46,30 @@ services:
       FACELAB_FAST: "1"
       FACELAB_QUERY_N: "30"
       FACELAB_CPU_OFFLOAD: "0"
+      # Which back end draws the images:
+      #   openrouter -> hosted models over the OpenRouter API (needs internet)
+      #   lab        -> the FLUX.2 server at FLUX_API_URL (works offline)
+      #   local      -> a diffusers pipeline in this container (needs GPU+weights)
+      # Flip this one value to move between them; nothing else has to change.
+      FACELAB_PROVIDER: ${FACELAB_PROVIDER:-openrouter}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_IMAGE_MODEL: ${OPENROUTER_IMAGE_MODEL:-black-forest-labs/flux.2-pro}
+      OPENROUTER_EDIT_MODEL: ${OPENROUTER_EDIT_MODEL:-google/gemini-2.5-flash-image}
+      OPENROUTER_TIMEOUT: ${OPENROUTER_TIMEOUT:-300}
+      # Remote FLUX server (lab machine). Used when FACELAB_PROVIDER=lab; all
+      # generation/editing runs there and this container needs no weights.
+      FLUX_API_URL: ${FLUX_API_URL:-http://host.docker.internal:8000}
+      FLUX_API_TIMEOUT: ${FLUX_API_TIMEOUT:-900}
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
       HF_HOME: /hf
     volumes:
       - ./data:/data
       - hf_cache:/hf
+    # Lets the container reach services published on the host (the labmate's
+    # FLUX server) as http://host.docker.internal:8000 on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         reservations:

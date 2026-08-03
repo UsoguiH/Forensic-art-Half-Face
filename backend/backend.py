@@ -54,6 +54,12 @@ def _warmup() -> None:
     def run() -> None:
         try:
             with MODEL_LOCK:
+                if getattr(ENGINE, "provider", "") in ("fal", "openrouter"):
+                    # A hosted API has no cold-load cost to amortise, so generating
+                    # here would only spend credits on every restart. ArcFace does
+                    # load locally, so warm just that.
+                    ENGINE.signature(Image.new("RGB", (448, 448), (127, 127, 127)))
+                    return
                 img = ENGINE.generate("a passport-style studio portrait", seed=1, width=448, height=448)
                 ENGINE.signature(img)
         except Exception:
@@ -1017,6 +1023,31 @@ class BlendReq(BaseModel):
     reconstruct: bool = False
     model: str | None = Field(default=None, pattern="^(dev|klein)$")
 
+class HalfFaceReq(BaseModel):
+    """Complete a half-face photo, keeping the supplied half pixel-identical."""
+
+    image: str
+    side: str | None = Field(default=None, pattern="^(auto|left|right|top|bottom)$")
+    # Hand in a COMPLETE photo plus take="left" and the server keeps only that
+    # half before completing it, so the discarded half can score the result.
+    take: str | None = Field(default=None, pattern="^(left|right|top|bottom)$")
+    gender: str | None = Field(default=None, max_length=16)
+    prompt: str | None = Field(default=None, max_length=1200)
+    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    seed: int = Field(default=7, ge=0, le=2**31 - 1)
+    steps: int | None = Field(default=None, ge=1, le=50)
+    guidance: float | None = Field(default=None, ge=0.0, le=20.0)
+    tone_match: bool = True
+    seam_band: int | None = Field(default=None, ge=0, le=256)
+    align_radius: int = Field(default=6, ge=0, le=24)
+    align_scale: float = Field(default=0.08, ge=0.0, le=0.3)
+    identity_anchor: bool = True
+    reference: str | None = None
+    # Frontalization route only (profile uploads): total candidate pool, split
+    # across the two prompt styles (see faceid_reconstruct2). 8 = 4 seeds x 2.
+    candidates: int = Field(default=8, ge=1, le=8)
+    refine: bool = False
+
 def _mirror_fill(img: Image.Image, occlusion: str | None) -> Image.Image:
     """Crude symmetric pre-fill: reflect the visible half over the vertical
     midline to cover a left/right occlusion, giving the model a better start."""
@@ -1108,6 +1139,232 @@ def reconstruct(req: ReconstructReq):
             vector = require_signature(out, "reconstructed face")
         return {"image": to_data_url(out, lossless=True), "signature": vec_list(vector),
                 "method": method, "mock": ENGINE.is_mock}
+    except ValueError as exc:
+        raise fail(exc, 422) from exc
+    except Exception as exc:
+        raise fail(exc) from exc
+
+def _half_face_renderer(req: HalfFaceReq, *, low_guidance: bool = True):
+    """Adapter handing half_face whatever generator this deployment has.
+
+    fal.ai FLUX.2 [dev] is preferred and used even when another provider is the
+    global default, because it is the one route whose edit endpoint returns the
+    canvas at the exact pixel size it was given.
+    """
+    import half_face as hf
+
+    use_fal = False
+    try:
+        import fal_provider
+
+        use_fal = fal_provider.available()
+    except Exception:
+        use_fal = False
+    if low_guidance:
+        # Half-face wants a much lower guidance than ordinary generation: it keeps
+        # the identity closer and stops the model re-cropping. See hf.DEFAULT_GUIDANCE.
+        guidance = hf.DEFAULT_GUIDANCE if req.guidance is None else req.guidance
+    else:
+        # Frontalizing a profile is a big structural change; leave guidance at the
+        # provider default unless the caller pinned one.
+        guidance = req.guidance
+
+    def render(images, prompt, width, height, seed=None):
+        use_seed = req.seed if seed is None else seed
+        if use_fal and getattr(ENGINE, "provider", "") != "fal":
+            import fal_provider
+
+            w, h = fal_provider.fit_size(width, height)
+            out, slug = fal_provider.edit_images(
+                prompt, images, width=w, height=h, seed=use_seed,
+                steps=req.steps, guidance=guidance, model=req.model,
+            )
+            return out[0], {"provider": "fal", "model": slug, "render_size": [w, h]}
+        with MODEL_LOCK:
+            return ENGINE.render_edit(
+                images, prompt, width=width, height=height, seed=use_seed,
+                steps=req.steps, guidance=guidance, model=req.model,
+            )
+
+    return render
+
+def _frontalize_profile(
+    req: HalfFaceReq, image: Image.Image, pose: dict[str, Any],
+    truth: Image.Image | None = None,
+) -> dict[str, Any]:
+    """A side-profile photo is a complete head, not half of a frontal portrait —
+    mirroring it builds a two-faced canvas. Run the identity-first reconstruction
+    instead (faceid_reconstruct2): a prompt-diverse candidate pool ranked against
+    the fused profile+mirror identity. No pixel of the result can be guaranteed,
+    so ``pixel_exact`` is honestly False here."""
+    import faceid_reconstruct2 as f2
+
+    render = _half_face_renderer(req, low_guidance=False)
+
+    embed = None
+    if not getattr(ENGINE, "is_mock", False):
+        def embed(img):
+            with MODEL_LOCK:
+                return ENGINE.signature(img)
+
+    # ``candidates`` counts the whole pool; it is split across the two prompt
+    # styles (descriptive studio + scene-preserving) measured in the battery.
+    per_style = max(1, req.candidates // 2)
+    result = f2.reconstruct(
+        image,
+        renderer=render,
+        embed=embed,
+        seeds=f2.DEFAULT_SEEDS[:per_style],
+        who=_gender_phrase(req.gender).rstrip(", "),
+        extra_prompt=req.prompt or "",
+    )
+
+    out = result["image"]
+    signature = None
+    identity = {}
+    if embed is not None:
+        with MODEL_LOCK:
+            signature = ENGINE.signature(out)
+            truth_vec = ENGINE.signature(truth) if truth is not None else None
+        identity = {
+            "vs_supplied_half": result["sim_profile"],
+            "vs_reference": ENGINE.similarity(signature, truth_vec),
+        }
+    # Every candidate travels to the UI so the user can overrule the ArcFace
+    # pick with their own eyes. JPEG rather than lossless: 6 full-size PNGs
+    # would weigh megabytes and none of these carries a pixel-exact guarantee.
+    candidates = [
+        {
+            **meta,
+            "image": to_data_url(img, quality=90),
+            "picked": meta["stage"] == result["stage"] and meta["seed"] == result["seed"],
+        }
+        for meta, img in zip(result["candidates"], result["candidate_images"])
+    ]
+    return {
+        "image": to_data_url(out, lossless=True),
+        "half": to_data_url(image, lossless=True),
+        "signature": vec_list(signature),
+        "pixel_exact": False,
+        "method": "frontalized",
+        "pose": pose,
+        "stage": result["stage"],
+        "seed_used": result["seed"],
+        "candidates": candidates,
+        "identity": identity,
+        "render": result["render"],
+        "seconds": result["seconds"],
+        "mock": getattr(ENGINE, "is_mock", False),
+    }
+
+@app.post("/half_face")
+def half_face(req: HalfFaceReq):
+    """Rebuild a whole face from one half of a photo.
+
+    The half that was supplied is returned byte-for-byte identical — it is
+    pasted back over the render at its exact coordinates, and the response
+    carries ``pixel_exact`` to say so. Only the missing half is generated.
+
+    Uploads are classified first (``method`` in the response says which route
+    ran): a genuine half runs the pixel-exact pipeline; a side-profile photo is
+    frontalized instead, because mirroring a whole head yields a two-faced
+    canvas; an already-complete frontal photo comes back unchanged.
+
+    ``take`` is the demo/validation path: hand it a complete photo and the
+    server keeps only that half before completing it, so the reconstruction can
+    be scored against the original it came from.
+    """
+    import half_face as hf
+
+    try:
+        image = from_data_url(req.image)
+        truth = None
+        if req.take:
+            truth = image
+            image = hf.take_half(image, req.take)
+        elif req.reference:
+            truth = from_data_url(req.reference)
+
+        detector = None
+        if not getattr(ENGINE, "is_mock", False):
+            def detector(img):
+                with MODEL_LOCK:
+                    return ENGINE.detect_faces(img)
+
+        # A profile photo or an already-complete face must never be mirrored —
+        # that is what produced two-headed results. ``take`` skips the check:
+        # there the server cut the half itself, so its nature is known.
+        if not req.take and detector is not None:
+            kind, pose = hf.classify(image, detector)
+            if kind == "profile":
+                return _frontalize_profile(req, image, pose, truth=truth)
+            if kind == "full":
+                with MODEL_LOCK:
+                    signature = ENGINE.signature(image)
+                return {
+                    "image": to_data_url(image, lossless=True),
+                    "half": to_data_url(image, lossless=True),
+                    "signature": vec_list(signature),
+                    "pixel_exact": True,
+                    "method": "already-complete",
+                    "pose": pose,
+                    "identity": {},
+                    "render": {},
+                    "seconds": 0.0,
+                    "mock": getattr(ENGINE, "is_mock", False),
+                }
+
+        started = time.time()
+        result = hf.complete(
+            image,
+            renderer=_half_face_renderer(req),
+            side=req.side,
+            gender=_gender_phrase(req.gender).rstrip(", "),
+            extra_prompt=req.prompt or "",
+            seed=req.seed,
+            tone_match=req.tone_match,
+            seam_band=req.seam_band,
+            align_radius=req.align_radius,
+            align_scale=req.align_scale,
+            identity_anchor=req.identity_anchor,
+            detector=detector,
+        )
+        elapsed = round(time.time() - started, 2)
+
+        out = result["image"]
+        signature = None
+        identity = {}
+        if not getattr(ENGINE, "is_mock", False):
+            with MODEL_LOCK:
+                signature = ENGINE.signature(out)
+                half_vec = ENGINE.signature(result["half"])
+                truth_vec = ENGINE.signature(truth) if truth is not None else None
+            identity = {
+                "vs_supplied_half": ENGINE.similarity(signature, half_vec),
+                "vs_reference": ENGINE.similarity(signature, truth_vec),
+            }
+
+        payload = {
+            "image": to_data_url(out, lossless=True),
+            "half": to_data_url(result["half"], lossless=True),
+            "mirror_canvas": to_data_url(result["canvas"], lossless=True),
+            "signature": vec_list(signature),
+            "method": "half-completion",
+            "pixel_exact": result["pixel_exact"],
+            "geometry": result["geometry"].as_dict(),
+            "side_detected_by": result["side_detected_by"],
+            "align": result["align"],
+            "align_residual": result["align_residual"],
+            "seam_step": result["seam_step"],
+            "seam_band": result["seam_band"],
+            "identity": identity,
+            "render": result["render"],
+            "seconds": elapsed,
+            "mock": getattr(ENGINE, "is_mock", False),
+        }
+        if truth is not None:
+            payload["accuracy"] = hf.verify(result, truth)
+        return payload
     except ValueError as exc:
         raise fail(exc, 422) from exc
     except Exception as exc:

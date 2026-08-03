@@ -1,0 +1,7 @@
+# Local smoke-testing ONLY (machines without an NVIDIA GPU).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.nogpu.yml up -d
+# On the lab machine use plain `docker compose up -d` (GPU enabled).
+services:
+  facelab:
+    deploy: !override
+      resources: {}
