@@ -78,7 +78,29 @@ DESC_NAWAF = (
     "and solid build. Warm medium skin tone, a man around thirty"
 )
 
+# Contingency variant: the full description measurably hurt the CLEAN
+# close-up tier (whatsapp pool best 0.56 vs champion 0.6339) — text competes
+# with strong pixels. The lite variant keeps only the three facts FLUX got
+# wrong there (mustache weight, eye shape, chin) inside the proven idportrait
+# framing, plus a chain.
+DESC_YOUNG_LITE = (
+    "A thin, sparse young-man's mustache — much lighter than average. Medium-size, "
+    "slightly hooded dark eyes. A rounded, slightly recessed chin and full cheeks"
+)
+
 SUBJECTS: dict[str, dict] = {
+    "whatsapp-lite": {
+        "primary": HALF / "WhatsApp Image 2026-08-02 at 6.38.18 AM (2).jpeg",
+        "extras": [],
+        "truth": HALF / "WhatsApp Image 2026-08-02 at 6.38.17 AM (1).jpeg",
+        "target": None,
+        "description": DESC_YOUNG_LITE,
+        "arms": [
+            Arm("forensic", (101, 202, 301)),   # lite facts in the studio skeleton
+        ],
+        "force_enrich": True,          # rich tier, but chains built the 0.6339
+        "prev": {"vs_truth": 0.6339},
+    },
     "whatsapp": {
         "primary": HALF / "WhatsApp Image 2026-08-02 at 6.38.18 AM (2).jpeg",
         "extras": [],
@@ -245,10 +267,15 @@ def run_subject(name: str, args) -> dict:
     description = spec["description"] if not args.no_desc else ""
     if description:
         ev.traits = ""  # the description states age; a conflicting detector age would fight it
+    enrich: bool | None = None
+    if args.mock or args.no_enrich:
+        enrich = False
+    elif spec.get("force_enrich"):
+        enrich = True
     opts = Options(
         arms=arms,
         description=description,
-        enrich=False if (args.mock or args.no_enrich) else None,
+        enrich=enrich,
     )
     t0 = time.time()
     result = reconstruct_frontal(ev, renderer=renderer, detector=detector, embed=embed, opts=opts)
