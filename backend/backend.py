@@ -1051,6 +1051,11 @@ class HalfFaceReq(BaseModel):
     # strongest identity lever measured. They become extra tight-crop
     # references and their embeddings fuse into the ranking anchor.
     extra_images: list[str] = Field(default_factory=list, max_length=6)
+    # v7: examiner identity notes — concrete observed facts about THIS person
+    # (face shape, facial-hair pattern, hairline state, eye/nose/lip shape...).
+    # An analyst writes it today; a local VLM can fill it on the lab box. It is
+    # the strongest anti-idealization signal measured; see backend/halfface.
+    description: str | None = Field(default=None, max_length=600)
 
 def _mirror_fill(img: Image.Image, occlusion: str | None) -> Image.Image:
     """Crude symmetric pre-fill: reflect the visible half over the vertical
@@ -1192,72 +1197,21 @@ def _half_face_renderer(req: HalfFaceReq, *, low_guidance: bool = True):
 
     return render
 
-_MIN_FRONTALITY = 0.55        # below this a candidate kept the head turned
-_EVIDENCE_POOR_PX = 200       # face smaller than this: CCTV tier — enrich
-
-
-def _gated_pick(
-    metas: list[dict[str, Any]],
-    images: list[Image.Image],
-    detector,
-    embed=None,
-    anchor: "np.ndarray | None" = None,
-) -> "tuple[int, list[dict[str, Any]]]":
-    """Re-rank a candidate pool with the scope-battery gates applied.
-
-    Measured on the Scope set (see HALF_FACE_V3_PLAN.md §5b): the candidate
-    with the highest similarity-to-profile is often a pose-clone — it kept the
-    head turned, or copied the profile's pose-biased embedding, and similarity
-    ranking alone cannot tell that apart from fidelity. Gate on frontality and
-    on suspiciously-high similarity FIRST, then rank what survives.
-    """
-    import face_crop
-    import faceid_reconstruct2 as f2
-
-    annotated = []
-    for meta, img in zip(metas, images):
-        front = 0.0
-        if detector is not None:
-            front = face_crop.frontality(face_crop.biggest_face(detector(img) or []))
-        score = meta.get("rank_score")
-        gated = front < _MIN_FRONTALITY or (
-            score is not None and score > f2.SUSPICIOUS_SIMILARITY
-        )
-        sim_fused = None
-        if anchor is not None and embed is not None:
-            v = embed(img)
-            if v is not None:
-                v = np.asarray(v, dtype=np.float32).reshape(-1)
-                sim_fused = round(float(np.dot(v, anchor)), 4)
-        annotated.append({**meta, "frontality": front, "gated": gated, "sim_fused": sim_fused})
-    pool = [i for i, c in enumerate(annotated) if not c["gated"]] or list(range(len(annotated)))
-    # With a fused multi-photo anchor, rank against it (variance-reduced);
-    # otherwise fall back to the single-photo min-both rank_score.
-    if anchor is not None:
-        key = lambda i: (annotated[i]["sim_fused"]
-                         if annotated[i]["sim_fused"] is not None else -1.0)  # noqa: E731
-    else:
-        key = lambda i: (annotated[i]["rank_score"]
-                         if annotated[i]["rank_score"] is not None else -1.0)  # noqa: E731
-    return max(pool, key=key), annotated
-
-
 def _frontalize_profile(
     req: HalfFaceReq, image: Image.Image, pose: dict[str, Any],
     truth: Image.Image | None = None,
 ) -> dict[str, Any]:
-    """A side-profile photo is a complete head, not half of a frontal portrait —
-    mirroring it builds a two-faced canvas. Run the identity-first reconstruction
-    instead: normalize the scene to a head-and-shoulders crop, render an
-    ID-portrait candidate pool (faceid_reconstruct2), gate out pose-clones,
-    and — on evidence-poor CCTV-tier faces — add one enrichment round with the
-    draft winner as an extra reference (measured: helps or neutral on that tier,
-    hurts close-ups, so it is tier-conditional). No pixel of the result can be
-    guaranteed, so ``pixel_exact`` is honestly False here."""
-    from PIL import ImageOps
-
-    import face_crop
-    import faceid_reconstruct2 as f2
+    """v7 "Witness" route (backend/halfface package): a side-profile photo is a
+    complete head, not half of a frontal portrait — mirroring it builds a
+    two-faced canvas. Normalize the scene to a head-and-shoulders crop, render
+    a described ID-portrait candidate pool (pose block → per-subject identity
+    notes → anti-idealization block), gate out pose-clones, rank against the
+    fused quality-weighted evidence anchor, and on the evidence-poor CCTV tier
+    run the draft-as-reference enrichment chain (depth 2, dedicated seeds —
+    the v5 empty-slice crash is structurally impossible here). No pixel of the
+    result can be guaranteed, so ``pixel_exact`` is honestly False."""
+    from halfface import build_evidence
+    from halfface.pipeline import Options, reconstruct_frontal
 
     render = _half_face_renderer(req, low_guidance=False)
 
@@ -1272,180 +1226,89 @@ def _frontalize_profile(
             with MODEL_LOCK:
                 return ENGINE.signature(img)
 
-    # ---- normalize: whatever the scene, downstream sees one portrait crop ----
-    working, crop_meta, face = image, {}, None
-    if detector is not None:
-        face = face_crop.biggest_face(detector(image) or [])
-    if face is not None:
-        working, crop_meta = face_crop.head_shoulders_crop(image, face.bbox[:4])
+    extras: list[Image.Image] = []
+    for data_url in req.extra_images:
+        try:
+            extras.append(from_data_url(data_url))
+        except Exception:
+            continue
 
-    # ---- extra photos of the same person: evidence, not decoration ----------
-    # Each becomes a tight face crop (density beats count — a pile of scene
-    # crops measurably DILUTED identity) and joins the fused ranking anchor.
-    extra_tights: list[Image.Image] = []
-    if req.extra_images and detector is not None:
-        for data_url in req.extra_images:
-            try:
-                extra = from_data_url(data_url)
-            except Exception:
-                continue
-            f = face_crop.biggest_face(detector(extra) or [])
-            if f is not None:
-                extra_tights.append(face_crop.tight_face_crop(extra, f.bbox[:4]))
-
-    face_px = 0.0
-    if face is not None:
-        fx0, fy0, fx1, fy1 = (float(v) for v in face.bbox[:4])
-        face_px = min(fx1 - fx0, fy1 - fy0)
-    evidence_poor = 0.0 < face_px < _EVIDENCE_POOR_PX
-
-    # ---- who/traits: caller wins; else the detector's free attributes -------
-    # (age estimates from tiny faces mislead the prompt — scope battery read a
-    # ~30-year-old as 37 — so age is injected only on the evidence-rich tier.)
-    who = _gender_phrase(req.gender).rstrip(", ")
-    if not who and face is not None:
-        who = {"M": "a man", "F": "a woman"}.get(getattr(face, "sex", None), "")
-    traits = ""
-    if not evidence_poor and face is not None:
-        age = getattr(face, "age", None)
-        if age:
-            traits = f"About {int(age)} years old."
-
-    # ---- multi-photo: references + fused ranking anchor ---------------------
-    references = None
-    styles = ("descriptive", "idportrait")
-    fused_anchor = None
-    if extra_tights:
-        references = [working] + extra_tights[:3]
-        if len(references) < 3:
-            references.append(ImageOps.mirror(working))
-        styles = ("multiref", "multirefstudio")
-        if embed is not None:
-            tight0 = (
-                face_crop.tight_face_crop(image, face.bbox[:4])
-                if face is not None else working
-            )
-            anchors = []
-            for t in [tight0] + extra_tights:
-                for view in (t, ImageOps.mirror(t)):
-                    v = embed(view)
-                    if v is not None:
-                        anchors.append(np.asarray(v, dtype=np.float32).reshape(-1))
-            if anchors:
-                m = np.mean(np.stack(anchors), axis=0)
-                n = float(np.linalg.norm(m))
-                fused_anchor = m / n if n > 0 else None
-
-    # ---- base pool: styles measured best on the scope battery ---------------
-    per_style = max(1, req.candidates // 2)
-    result = f2.reconstruct(
-        working,
-        renderer=render,
-        embed=embed,
-        seeds=f2.DEFAULT_SEEDS[:per_style],
-        prompt_styles=styles,
-        who=who,
-        traits=traits,
-        extra_prompt=req.prompt or "",
-        out_size=(832, 1216),
-        references=references,
+    ev = build_evidence(
+        image, extras,
+        detector=detector or (lambda _i: []), embed=embed,
+        who=_gender_phrase(req.gender).rstrip(", "),
     )
-    metas = [dict(c, round="base") for c in result["candidates"]]
-    images = list(result["candidate_images"])
-    best, annotated = _gated_pick(metas, images, detector, embed=embed, anchor=fused_anchor)
+    description = (req.description or "").strip()
+    if description:
+        # The examiner description owns age/build wording; a conflicting
+        # detector age estimate in `traits` would fight it inside the prompt.
+        ev.traits = ""
 
-    # ---- enrichment chain: CCTV tier only -----------------------------------
-    # Each round feeds the current winner back as an extra reference and, if
-    # its own gated pick survives, that pick REPLACES the champion (never
-    # compared to it by similarity-to-profile: enrichment pulls renders away
-    # from the profile pose, so scores sit lower even when identity improved).
-    # Chained twice — the measured peak on every subject; a third round
-    # regressed on all of them.
-    enriched = False
-    if evidence_poor and not getattr(ENGINE, "is_mock", False):
-        base_refs = (
-            references[:3] if references
-            else [working, ImageOps.mirror(working)]
-        )
-        enrich_extra = (
-            f"{(req.prompt or '').strip()} The last image is a draft frontal portrait of "
-            "the same person; keep everything that matches the side photos and correct "
-            "any feature that differs."
-        ).strip()
-        for chain, seeds in enumerate((f2.DEFAULT_SEEDS[4:6], f2.DEFAULT_SEEDS[6:8])):
-            draft_meta, draft = annotated[best], images[best]
-            second = f2.reconstruct(
-                working,
-                renderer=render,
-                embed=embed,
-                seeds=seeds,
-                prompt_styles=(draft_meta["stage"],),
-                who=who,
-                traits=traits,
-                extra_prompt=enrich_extra,
-                out_size=(832, 1216),
-                references=base_refs + [draft],
-            )
-            e_best, e_annotated = _gated_pick(
-                [dict(c, round=f"enrich{chain + 1}") for c in second["candidates"]],
-                list(second["candidate_images"]),
-                detector,
-                embed=embed,
-                anchor=fused_anchor,
-            )
-            result["render"] = second["render"]
-            if e_annotated[e_best]["gated"]:
-                break                      # chain broken: keep current champion
-            offset = len(metas)
-            metas += [dict(c) for c in e_annotated]
-            images += list(second["candidate_images"])
-            annotated += e_annotated
-            best = offset + e_best
-            enriched = True
+    opts = Options(
+        candidates=req.candidates,
+        description=description,
+        extra_prompt=req.prompt or "",
+        enrich=False if getattr(ENGINE, "is_mock", False) else None,
+    )
+    result = reconstruct_frontal(ev, renderer=render, detector=detector, embed=embed, opts=opts)
 
-    out = images[best]
-    picked = annotated[best]
-
+    out = result.winner.image
     signature = None
-    identity = {}
+    identity: dict[str, Any] = {}
     if embed is not None:
         with MODEL_LOCK:
             signature = ENGINE.signature(out)
             truth_vec = ENGINE.signature(truth) if truth is not None else None
         identity = {
-            "vs_supplied_half": picked.get("sim_profile"),
+            "vs_supplied_half": (
+                result.winner.sim_fused if ev.multi else result.winner.min_both
+            ),
             "vs_reference": ENGINE.similarity(signature, truth_vec),
         }
+
     # Every candidate travels to the UI so the user can overrule the ArcFace
     # pick with their own eyes — at CCTV anchor quality the ranking's rank-1
     # vs rank-3 is a coin flip, so the human look IS part of the pipeline.
-    candidates = [
-        {
-            **{k: v for k, v in meta.items() if k != "suspicious"},
-            "image": to_data_url(img, quality=90),
-            "picked": i == best,
-        }
-        for i, (meta, img) in enumerate(zip(annotated, images))
-    ]
+    # Legacy keys (stage/round/rank_score/sim_profile) ride along for the UI.
+    candidates = []
+    for c in result.candidates:
+        m = c.meta()
+        m.pop("suspicious", None)
+        m.pop("gate_reason", None)
+        m.update({
+            "stage": c.style,
+            "round": "base" if c.layout in ("std", "grid") else c.layout,
+            "rank_score": m.get("min_both"),
+            "sim_profile": m.get("sim_fused"),
+        })
+        candidates.append({
+            **m,
+            "image": to_data_url(c.image, quality=90),
+            "picked": c is result.winner,
+        })
+
+    ledger = result.ledger.summary() if result.ledger else {}
     return {
         "image": to_data_url(out, lossless=True),
-        "half": to_data_url(working, lossless=True),
+        "half": to_data_url(ev.working, lossless=True),
         "signature": vec_list(signature),
         "pixel_exact": False,
         "method": "frontalized",
+        "engine": "halfface-v7",
         "pose": pose,
-        "normalize": crop_meta,
-        "tier": "evidence-poor" if evidence_poor else "evidence-rich",
-        "n_extra_photos": len(extra_tights),
-        "enriched": enriched,
-        "stage": picked["stage"],
-        "seed_used": picked["seed"],
+        "normalize": ev.crop_meta,
+        "tier": result.tier,
+        "n_extra_photos": len(ev.photos) - 1,
+        "enriched": result.enriched,
+        "stage": result.winner.style,
+        "seed_used": result.winner.seed,
         "candidates": candidates,
         "identity": identity,
-        "render": result["render"],
-        "seconds": result["seconds"],
+        "render": {**result.winner.render_meta, "ledger": ledger},
+        "seconds": ledger.get("seconds", 0),
         "mock": getattr(ENGINE, "is_mock", False),
     }
+
 
 @app.post("/half_face")
 def half_face(req: HalfFaceReq):
