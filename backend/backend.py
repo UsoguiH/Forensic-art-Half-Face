@@ -1354,52 +1354,54 @@ def _frontalize_profile(
     images = list(result["candidate_images"])
     best, annotated = _gated_pick(metas, images, detector, embed=embed, anchor=fused_anchor)
 
-    # ---- enrichment round: CCTV tier only -----------------------------------
+    # ---- enrichment chain: CCTV tier only -----------------------------------
+    # Each round feeds the current winner back as an extra reference and, if
+    # its own gated pick survives, that pick REPLACES the champion (never
+    # compared to it by similarity-to-profile: enrichment pulls renders away
+    # from the profile pose, so scores sit lower even when identity improved).
+    # Chained twice — the measured peak on every subject; a third round
+    # regressed on all of them.
     enriched = False
     if evidence_poor and not getattr(ENGINE, "is_mock", False):
-        draft_meta, draft = annotated[best], images[best]
-        enrich_extra = (
-            f"{(req.prompt or '').strip()} The third image is a draft frontal portrait of "
-            "the same person; correct any facial feature that differs so everything matches "
-            "the first two photographs exactly."
-        ).strip()
         base_refs = (
             references[:3] if references
             else [working, ImageOps.mirror(working)]
         )
-        second = f2.reconstruct(
-            working,
-            renderer=render,
-            embed=embed,
-            seeds=f2.DEFAULT_SEEDS[4:6],
-            prompt_styles=(draft_meta["stage"],),
-            who=who,
-            traits=traits,
-            extra_prompt=enrich_extra,
-            out_size=(832, 1216),
-            references=base_refs + [draft],
-        )
-        # The enriched pick REPLACES the base pick whenever it survives the
-        # gates. Never compare base and enriched by similarity-to-profile:
-        # enrichment pulls renders away from the profile pose, so its scores
-        # sit lower even when identity improved (measured +0.10 on the scope
-        # battery while min-both DROPPED — a cross-round comparison ships the
-        # wrong image).
-        e_best, e_annotated = _gated_pick(
-            [dict(c, round="enrich") for c in second["candidates"]],
-            list(second["candidate_images"]),
-            detector,
-            embed=embed,
-            anchor=fused_anchor,
-        )
-        if not e_annotated[e_best]["gated"]:
+        enrich_extra = (
+            f"{(req.prompt or '').strip()} The last image is a draft frontal portrait of "
+            "the same person; keep everything that matches the side photos and correct "
+            "any feature that differs."
+        ).strip()
+        for chain, seeds in enumerate((f2.DEFAULT_SEEDS[4:6], f2.DEFAULT_SEEDS[6:8])):
+            draft_meta, draft = annotated[best], images[best]
+            second = f2.reconstruct(
+                working,
+                renderer=render,
+                embed=embed,
+                seeds=seeds,
+                prompt_styles=(draft_meta["stage"],),
+                who=who,
+                traits=traits,
+                extra_prompt=enrich_extra,
+                out_size=(832, 1216),
+                references=base_refs + [draft],
+            )
+            e_best, e_annotated = _gated_pick(
+                [dict(c, round=f"enrich{chain + 1}") for c in second["candidates"]],
+                list(second["candidate_images"]),
+                detector,
+                embed=embed,
+                anchor=fused_anchor,
+            )
+            result["render"] = second["render"]
+            if e_annotated[e_best]["gated"]:
+                break                      # chain broken: keep current champion
             offset = len(metas)
             metas += [dict(c) for c in e_annotated]
             images += list(second["candidate_images"])
             annotated += e_annotated
             best = offset + e_best
             enriched = True
-        result["render"] = second["render"]
 
     out = images[best]
     picked = annotated[best]

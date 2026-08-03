@@ -243,6 +243,27 @@ Measured over 3 more rounds (~30 renders):
   AI panels) and/or richer per-subject evidence (frames spanning genuinely
   different angles). The pipeline is ready for both (extra_images API).
 
+## 5d. v4.1 — iterated enrichment chains to convergence (2026-08-03, final)
+
+User authorized unlimited iteration for maximum visual identity. The
+enrichment round was chained (each round's winner becomes the next round's
+draft reference) per subject until a round regressed (stop rule: gain <
+0.005). Trajectories (vs target):
+
+- young8:   0.418 → 0.513 → 0.517 → 0.544 → 0.490   PEAK 0.5435 (chain e2)
+- man2:     0.420 → 0.465 → 0.472 → 0.480 → 0.474   PEAK 0.4796 (e2)
+- whatsapp: 0.606 → 0.633 → 0.634 → 0.592           PEAK 0.6339 (e2)
+- nawaf:    anchor 0.523 → 0.535 → 0.531            PEAK 0.5348 (e1)
+
+Findings: enrichment chains buy ~2 productive rounds then oscillate
+(convergence ~0.94-0.98 consensus between chain rounds); young8's peak BROKE
+the fused-evidence ceiling estimate (0.527) — that bound is soft; the
+per-feature corrective critique prompt (nawaf) was anchor-neutral. Peaks all
+exceed each subject's raw input anchor and, where measured, the target's own
+agreement with the evidence. ~100 renders total across v3+v4. Champions
+mirrored to Test_AI_Half/Final_Results/. Chain depth 2 is the shipping
+default for the enrichment stage.
+
 ## 6. Measurement protocol
 
 Three buckets, one config must win across all (no per-domain tuning):
