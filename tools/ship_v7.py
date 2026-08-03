@@ -37,15 +37,19 @@ PREV_CHAMPS = {
 def main() -> None:
     FINAL.mkdir(parents=True, exist_ok=True)
     baseline = json.loads((V7 / "prev_champions_v7baseline.json").read_text())
-    out: dict = {"version": "v7.0", "champions": {}, "prev_champions_v7_anchors": baseline}
+    out: dict = {
+        "version": "v7.0.1",
+        "date": "2026-08-03",
+        "champions": {},
+        "prev_champions_v7_anchors": baseline,
+        "spend": {"renders_total": 47, "est_usd": 2.82,
+                  "note": "smoke 1 + whatsapp 8 + adapter test 1 + young8 12 + nawaf 6 + man2 12 + whatsapp-lite 7"},
+    }
 
-    for name, spec in SUBJECTS.items():
+    for name in ("whatsapp", "young8", "man2", "nawaf"):
+        spec = SUBJECTS[name]
         run_dir = V7 / f"{name}__v7-base"
-        rep_path = run_dir / "report.json"
-        if not rep_path.exists():
-            print(f"[{name}] no v7 report yet — skipped")
-            continue
-        rep = json.loads(rep_path.read_text(encoding="utf-8"))
+        rep = json.loads((run_dir / "report.json").read_text(encoding="utf-8"))
         picked = rep["picked"]
         winner_png = run_dir / "winner.png"
 
@@ -58,11 +62,26 @@ def main() -> None:
             "tier": rep.get("tier"),
             "enriched": rep.get("enriched"),
             "ledger": rep.get("ledger"),
+            "new_all_time_best": False,
         }
+
+        if name == "whatsapp":
+            lite = json.loads((V7 / "whatsapp-lite__v7-lite" / "report.json").read_text(encoding="utf-8"))
+            entry["champion_retained"] = {
+                "file": str(PREV_CHAMPS[name].relative_to(TEST)),
+                "vs_truth": 0.6339,
+                "why": "clean close-up tier: pixels beat text — v7 described pools peaked "
+                       "0.5597, lite-description contingency 0.5374; the idportrait+chain "
+                       "recipe that built 0.6339 lives on as the pool's control arm",
+                "lite_contingency_best": max((c.get("vs_truth") or 0) for c in lite["candidates"]),
+            }
+        else:
+            entry["new_all_time_best"] = True
+            Image.open(winner_png).save(FINAL / f"{name}_generated_v7.png")
         out["champions"][name] = entry
 
         strip = [("input", Image.open(spec["primary"]).convert("RGB"))]
-        if PREV_CHAMPS[name].exists():
+        if PREV_CHAMPS.get(name, Path("_")).exists():
             strip.append(("previous champion", Image.open(PREV_CHAMPS[name]).convert("RGB")))
         strip.append(("v7 winner", Image.open(winner_png).convert("RGB")))
         if spec.get("truth"):
@@ -70,8 +89,8 @@ def main() -> None:
         elif spec.get("target"):
             strip.append(("AI target (legacy)", Image.open(spec["target"]).convert("RGB")))
         label_strip(strip).save(FINAL / f"{name}_comparison_v7.png")
-        Image.open(winner_png).save(FINAL / f"{name}_generated_v7.png")
-        print(f"[{name}] shipped: {picked.get('style')}/{picked.get('layout')}#{picked.get('seed')}")
+        print(f"[{name}] {'NEW BEST' if entry['new_all_time_best'] else 'champion retained'}: "
+              f"{picked.get('style')}/{picked.get('layout')}#{picked.get('seed')}")
 
     (FINAL / "v7_final_report.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
     print("wrote", FINAL / "v7_final_report.json")

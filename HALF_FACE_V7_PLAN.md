@@ -137,9 +137,43 @@ Every render logged to a ledger (count × est. $/render) printed at each run's e
 ## 9. Execution order (tasks)
 
 1. Plan doc (this file) ✅
-2. Package `backend/halfface/` (evidence, describe, prompts, rank, generate, pipeline)
-3. Harness tools/iterate_v7.py + subject registry incl. per-subject descriptions
-4. Mock dry-run battery (0 renders) — correctness + prompt review
-5. Smoke render (1) then benchmark pools (~30) with decision rules from §7
-6. Rewire backend._frontalize_profile → halfface package (+bug fix), routing battery offline re-run
-7. Final_Results refresh (winners + boards + report.json), commit + push, memory update
+2. Package `backend/halfface/` (evidence, describe, prompts, rank, generate, pipeline) ✅
+3. Harness tools/iterate_v7.py + subject registry incl. per-subject descriptions ✅
+4. Mock dry-run battery (0 renders) — correctness + prompt review ✅
+5. Smoke render (1) then benchmark pools with decision rules from §7 ✅ (47 renders, ≈$2.82)
+6. Rewire backend._frontalize_profile → halfface package (+bug fix), routing battery 33/33 ✅
+7. Final_Results refresh (winners + boards + report.json), commit + push, memory update ✅
+
+## 10. RESULTS — 2026-08-03 battery (v7.0.1)
+
+Honest metrics under identical v7 anchors (prev champions re-scored with the same code):
+
+| subject | honest metric | prev best | v7 | verdict |
+|---|---|---|---|---|
+| young8 (CCTV ×4) | vs REAL truth | 0.4627 | **0.4756** | NEW BEST (forensic/std#7) |
+|                  | fused evidence | 0.5277 | **0.5857** | NEW BEST (+11%) |
+| man2 (CCTV ×3)   | fused evidence | 0.4739 | **0.5069** | NEW BEST (+7%, forensicdoc/enrich1#101) |
+| nawaf (phone)    | min_both | 0.5185 | **0.5775** | NEW BEST (+11%, forensicdoc/std#21) |
+|                  | fused | 0.5533 | **0.5931** | NEW BEST |
+| whatsapp (clean) | vs REAL truth | 0.6339 | 0.5597 pool best; lite 0.5374 | champion RETAINED |
+
+Findings that set the production defaults:
+- The examiner description swept every subject with marked non-ideal features
+  (CCTV young8: described forensic took the top 8/12 slots; CCTV man2: described
+  arms took the top 7; nawaf: described forensicdoc beat the idportrait control
+  by +0.076 in-pool) and visibly fixed the four idealization failure modes
+  (nawaf finally renders his receding hairline and patchy beard).
+- On the clean close-up (whatsapp) text competes with strong pixels: full AND
+  lite descriptions both lost to the pixel-trusting idportrait+chain champion.
+  Verdict: pool all three arms (forensic, forensicdoc, idportrait-control) and
+  let the anchor decide per subject — encoded in pipeline.default_arms.
+- Enrichment chain: helps weak bases (man2 0.484→0.507 fused), regresses strong
+  ones (young8 0.4756→0.4614 vs truth under blind replace) → multi-photo picks
+  by global argmax-fused across ALL rounds (v7.0.1); single-photo keeps
+  replace-outright (whatsapp 0.606→0.634 measured).
+- Identity-sheet grid layout lost to standard refs on young8 (0.417 vs 0.476)
+  — rejected.
+- vs the AI panels (legacy): man2 0.3955, young8 0.4432 — DOWN while every real
+  metric is up, exactly as the ceiling analysis predicts (the panels agree with
+  the real evidence at only 0.37–0.53; matching the person better means
+  matching them worse). The panels stay report-only.
