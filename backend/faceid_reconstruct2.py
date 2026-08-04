@@ -59,7 +59,13 @@ def descriptive_prompt(who: str = "", traits: str = "") -> str:
         f"focus across the entire face. {their.capitalize()} face, hair and clothing are "
         "identical to the source photos — the same eyebrows, the same eyes, the same nose, "
         "the same lips, the same facial hair, the same jawline, the same hairline and "
-        f"haircut, the same clothing.{traits}"
+        f"haircut, the same clothing. Pay special attention to the eyes: reproduce exactly "
+        "the eye visible in the side photos — the same eyelid shape and heaviness, the same "
+        "eye size and depth, the same eyebrow-to-eye distance, the same calm gaze, the same "
+        "under-eye area with no added dark circles and no exaggerated tiredness. The picture "
+        f"must show this {person} exactly once: a single frontal head only — no side views, "
+        "no profile views anywhere in the frame, no extra faces, no multi-view sheet, no "
+        f"duplicated heads at the edges of the image.{traits}"
     )
 
 
@@ -78,7 +84,14 @@ def preserving_prompt(who: str = "", traits: str = "") -> str:
         "framing, the head at the same scale and position. The frontal face must be the real "
         f"face of this same {person} — the same eyebrows, eyes, nose, lips, facial hair, "
         "jawline, hairline, haircut and skin texture, with both eyes looking into the lens, "
-        f"neutral expression, photorealistic, no beautification, no smoothing.{traits}"
+        "neutral expression, photorealistic, no beautification, no smoothing. Pay special "
+        "attention to the eyes: reproduce exactly the eye visible in the side photos — the "
+        "same eyelid shape and heaviness, the same eye size and depth, the same "
+        "eyebrow-to-eye distance, the same calm gaze, the same under-eye area with no added "
+        "dark circles and no exaggerated tiredness. The picture must show this "
+        f"{person} exactly once: a single frontal head only — no side views, no profile "
+        "views anywhere in the frame, no extra faces, no multi-view sheet, no duplicated "
+        f"heads at the edges of the image.{traits}"
     )
 
 

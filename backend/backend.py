@@ -1219,6 +1219,62 @@ def _frontalize_profile(
         extra_prompt=req.prompt or "",
     )
 
+    # ---- post-filter: the deliverable is ONE forward-facing head -----------
+    # Two failure modes seen in the field: (a) collage renders that embed
+    # extra profile views beside the face, (b) renders that kept the head
+    # turned. Both are dropped from the pool and the grid, and the pick is
+    # re-run over the survivors. If nothing survives, the original pool ships
+    # untouched — a bad grid beats an empty one.
+    detector = None
+    if not getattr(ENGINE, "is_mock", False):
+        def detector(img):
+            with MODEL_LOCK:
+                return ENGINE.detect_faces(img)
+
+    def _one_frontal_face(img: Image.Image) -> bool:
+        if detector is None:
+            return True
+        try:
+            faces = detector(img) or []
+        except Exception:
+            return True
+        if len(faces) != 1:
+            return False
+        face = faces[0]
+        try:
+            kps = np.asarray(face.kps, dtype=np.float32)
+            x0, _, x1, _ = (float(v) for v in face.bbox[:4])
+            left_eye, right_eye, nose = kps[0], kps[1], kps[2]
+            gap = abs(float(right_eye[0]) - float(left_eye[0]))
+            if gap < 1e-3:
+                return False
+            centred = 1.0 - min(1.0, abs(
+                float(nose[0]) - (float(left_eye[0]) + float(right_eye[0])) / 2.0
+            ) / (gap / 2.0))
+            spread = min(1.0, (gap / max(1.0, x1 - x0)) / 0.34)
+            return min(centred, spread) >= 0.55
+        except Exception:
+            return True
+
+    keep = [i for i in range(len(result["candidate_images"]))
+            if _one_frontal_face(result["candidate_images"][i])]
+    if keep and len(keep) < len(result["candidate_images"]):
+        result["candidates"] = [result["candidates"][i] for i in keep]
+        result["candidate_images"] = [result["candidate_images"][i] for i in keep]
+    if keep:
+        metas = result["candidates"]
+        best_i = max(
+            range(len(metas)),
+            key=lambda i: (
+                not metas[i].get("suspicious"),
+                metas[i]["rank_score"] if metas[i].get("rank_score") is not None else -1.0,
+            ),
+        )
+        result["image"] = result["candidate_images"][best_i]
+        result["stage"] = metas[best_i]["stage"]
+        result["seed"] = metas[best_i]["seed"]
+        result["sim_profile"] = metas[best_i].get("sim_profile")
+
     out = result["image"]
     signature = None
     identity = {}
