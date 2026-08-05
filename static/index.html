@@ -141,6 +141,11 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
 .hfCompare .cmpCol.res .cmpLbl{background:rgba(232,163,61,.94);color:#1a1204;border:none}
 .hfCompare .cmpArrow{align-self:center;font-size:18px;color:#e8a33d;text-shadow:0 0 14px rgba(232,163,61,.55);flex:0 0 auto;animation:hfPulse 1.8s ease-in-out infinite}
 @keyframes hfPulse{0%,100%{transform:translateX(0);opacity:.75}50%{transform:translateX(-4px);opacity:1}}
+.genThink{display:none;align-items:center;gap:9px;margin-top:12px;padding:6px 2px}
+.genThink .gtDot{width:8px;height:8px;border-radius:50%;background:#aab2c0;animation:gtPulse 1.1s ease-in-out infinite;flex:0 0 auto}
+.genThink .gtText{font-size:13px;font-weight:500;color:transparent;background:linear-gradient(90deg,#6b7280 30%,#e8eaee 50%,#6b7280 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;animation:gtShimmer 2s linear infinite}
+@keyframes gtPulse{0%,100%{transform:scale(.72);opacity:.45}50%{transform:scale(1);opacity:1}}
+@keyframes gtShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .compare{position:relative;margin-top:13px;border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:2/1;display:none;direction:ltr}
 .compare canvas{position:absolute;top:0;left:0;height:100%;width:100%;object-fit:cover}
 .compare .seam{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 12px #fff;left:50%}
@@ -411,6 +416,7 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
             <button class="btn a2" id="c2half" style="padding:8px 14px" disabled>🪞 أكمل الوجه</button>
           </div>
           <div class="hintline" id="c2halfStatus"></div>
+          <div id="genThink" class="genThink"><span class="gtDot"></span><span class="gtText" id="genThinkText">جارٍ التحليل…</span></div>
           <div id="c2hfCompare" class="hfCompare">
             <div class="cmpCol"><img id="c2hfInput" alt="الصورة الأصلية"><div class="cmpLbl">📷 صورتك الأصلية</div></div>
             <div class="cmpArrow">⬅</div>
@@ -1572,6 +1578,28 @@ function hideHfCompare() {
   $("c2hfResult").removeAttribute("src");
 }
 
+/* ChatGPT-style quiet progress: a pulsing dot + shimmering step text driven by
+   elapsed time (the server call is one long await; ~18s per candidate). */
+let genTimer = null;
+function startGenThink() {
+  const t0 = Date.now();
+  const txt = $("genThinkText");
+  const step = () => {
+    const s = (Date.now() - t0) / 1000;
+    if (s < 6) txt.textContent = "جارٍ تحليل الصورة…";
+    else if (s < 160) txt.textContent = `جارٍ توليد المرشحين… ${Math.min(8, 1 + Math.floor((s - 6) / 18))} من 8`;
+    else txt.textContent = "جارٍ ترتيب النتائج بالبصمة…";
+  };
+  step();
+  $("genThink").style.display = "flex";
+  genTimer = setInterval(step, 1500);
+}
+function stopGenThink() {
+  if (genTimer) clearInterval(genTimer);
+  genTimer = null;
+  $("genThink").style.display = "none";
+}
+
 /* All frontalization candidates, best first, as a clickable gallery: the star
    marks the automatic ArcFace pick, and one click adopts any other candidate. */
 function renderHalfCandidates(result) {
@@ -1621,8 +1649,8 @@ $("c2half").onclick = async () => {
   if (mode !== "studio") setMode("studio");
   const btn = $("c2half"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ جارٍ الإكمال…";
   $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
-  $("c2halfStatus").textContent =
-    "جارٍ الإكمال… نصف أمامي: توليد واحد (~دقيقة). صورة جانبية: عدة مرشحين يُرتَّبون بالبصمة (قد يستغرق دقائق).";
+  $("c2halfStatus").textContent = "";
+  startGenThink();
   try {
     const side = $("c2halfSide").value || null;
     const body = {image: halfImage, gender: segVal("c2gender", "data-g") || null, model: engineModel || undefined};
@@ -1674,7 +1702,7 @@ $("c2half").onclick = async () => {
     $("c2halfStatus").innerHTML = `${exact}<br><span style="color:#7f8ca3">${esc(bits.join(" · "))}</span>`;
   } catch (error) {
     $("c2halfStatus").innerHTML = `<span style="color:#ff7b8b">فشل الإكمال: ${esc(error.message)}</span>`;
-  } finally { btn.disabled = false; btn.textContent = orig; }
+  } finally { stopGenThink(); btn.disabled = false; btn.textContent = orig; }
 };
 
 /* ---- blend up to 10 photos of one person into a robust identity (paper idea) ---- */
