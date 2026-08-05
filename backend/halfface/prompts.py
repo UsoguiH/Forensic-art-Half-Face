@@ -80,7 +80,18 @@ def _anti_idealization(their: str) -> str:
         "idealize, do not thicken, darken or tidy the facial hair beyond what the photos "
         f"show, do not lower or fill in {their} hairline, do not narrow or lengthen the "
         "face, and keep the natural asymmetries, skin texture and apparent age exactly as "
-        "photographed."
+        "photographed. Pay special attention to the eyes: reproduce exactly the eye "
+        "visible in the side photos — the same eyelid shape and heaviness, the same eye "
+        "size and depth, the same eyebrow-to-eye distance, with no added dark circles and "
+        "no exaggerated tiredness."
+    )
+
+
+def _single_face(person: str) -> str:
+    return (
+        f"The picture must show this {person} exactly once: a single frontal head only — "
+        "no side views, no profile views anywhere in the frame, no extra faces, no "
+        "multi-view sheet, no duplicated heads at the edges of the image."
     )
 
 
@@ -130,6 +141,7 @@ def build(
         setting,
         _identity(description),
         _anti_idealization(their),
+        _single_face(person),
         (
             f"{they_are} wearing exactly the same clothing and any headwear as in the "
             "source photos. Photorealistic, sharp focus across the entire "
