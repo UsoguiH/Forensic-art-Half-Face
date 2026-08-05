@@ -133,6 +133,14 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
 .candCard.sel{border-color:#e8a33d;box-shadow:0 0 0 2px rgba(232,163,61,.35),0 8px 20px rgba(0,0,0,.5)}
 .candCard img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
 .candPick{position:absolute;top:6px;right:6px;background:rgba(232,163,61,.92);color:#1a1204;font-weight:800;font-size:10px;padding:2px 7px;border-radius:999px}
+.hfCompare{display:none;gap:12px;margin-top:13px;align-items:stretch}
+.hfCompare .cmpCol{flex:1;position:relative;border-radius:14px;overflow:hidden;border:2px solid #2a3245;background:#0d1017;transition:border-color .2s ease}
+.hfCompare .cmpCol.res{border-color:#e8a33d;box-shadow:0 0 0 2px rgba(232,163,61,.28),0 10px 26px rgba(0,0,0,.45)}
+.hfCompare img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.hfCompare .cmpLbl{position:absolute;top:8px;right:8px;background:rgba(5,8,14,.82);color:#dfe6f3;font-weight:800;font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid #ffffff22;backdrop-filter:blur(4px)}
+.hfCompare .cmpCol.res .cmpLbl{background:rgba(232,163,61,.94);color:#1a1204;border:none}
+.hfCompare .cmpArrow{align-self:center;font-size:24px;color:#e8a33d;text-shadow:0 0 14px rgba(232,163,61,.55);flex:0 0 auto;animation:hfPulse 1.8s ease-in-out infinite}
+@keyframes hfPulse{0%,100%{transform:translateX(0);opacity:.75}50%{transform:translateX(-4px);opacity:1}}
 .compare{position:relative;margin-top:13px;border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:2/1;display:none;direction:ltr}
 .compare canvas{position:absolute;top:0;left:0;height:100%;width:100%;object-fit:cover}
 .compare .seam{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 12px #fff;left:50%}
@@ -403,6 +411,11 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
             <button class="btn a2" id="c2half" style="padding:8px 14px" disabled>🪞 أكمل الوجه</button>
           </div>
           <div class="hintline" id="c2halfStatus"></div>
+          <div id="c2hfCompare" class="hfCompare">
+            <div class="cmpCol"><img id="c2hfInput" alt="الصورة الأصلية"><div class="cmpLbl">📷 صورتك الأصلية</div></div>
+            <div class="cmpArrow">⬅</div>
+            <div class="cmpCol res"><img id="c2hfResult" alt="الوجه المولّد"><div class="cmpLbl">✨ الوجه المُولَّد</div></div>
+          </div>
           <div id="c2halfCands" class="candGrid" style="display:none"></div>
         </div>
         <div class="reconBox">
@@ -1546,6 +1559,19 @@ $("c2recon").onclick = async () => {
 /* ---- half face -> whole face, with the supplied half preserved pixel for pixel ---- */
 let halfImage = null;
 
+/* Input-vs-result strip: the uploaded photo STAYS on screen next to whatever
+   face is currently adopted, so the viewer always sees the source evidence. */
+function showHfCompare(inputSrc, resultSrc) {
+  $("c2hfInput").src = inputSrc;
+  $("c2hfResult").src = resultSrc;
+  $("c2hfCompare").style.display = "flex";
+}
+function hideHfCompare() {
+  $("c2hfCompare").style.display = "none";
+  $("c2hfInput").removeAttribute("src");
+  $("c2hfResult").removeAttribute("src");
+}
+
 /* All frontalization candidates, best first, as a clickable gallery: the star
    marks the automatic ArcFace pick, and one click adopts any other candidate. */
 function renderHalfCandidates(result) {
@@ -1569,6 +1595,7 @@ function renderHalfCandidates(result) {
       let signature = null;
       try { signature = (await api.post("/signature", {image: c.image})).signature; } catch (_) {}
       await setCurrent(c.image, signature, "مرشح مختار");
+      if (halfImage) showHfCompare(halfImage, c.image);
       $("c2halfStatus").innerHTML =
         `<b style="color:var(--good)">✔ اعتمدتَ هذا المرشح.</b> اقفل الهوية أو انتقل للبحث به.`;
     };
@@ -1584,6 +1611,7 @@ $("c2halffile").onchange = async event => {
     await orbShowImage(halfImage);
     $("c2half").disabled = false;
     $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
+    hideHfCompare();
     $("c2halfStatus").textContent = "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
   } catch (_) { $("c2halfStatus").textContent = "تعذّر قراءة الصورة."; }
 };
@@ -1603,6 +1631,8 @@ $("c2half").onclick = async () => {
     const result = await api.post("/half_face", body);
     const label = result.method === "frontalized" ? "وجه أمامي من صورة جانبية" : "وجه مكتمل من نصف";
     await setCurrent(result.image, result.signature, label);
+    if (result.method === "already-complete") hideHfCompare();
+    else showHfCompare(halfImage, result.image);
 
     if (result.method === "frontalized") {
       // The upload was a side-profile photo, not half of a frontal picture —
