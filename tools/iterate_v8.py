@@ -178,6 +178,13 @@ def run_subject(name: str, args) -> dict:
     renderer = make_renderer(args)
 
     ev = build_evidence(primary, extras, detector=detector or (lambda i: []), embed=embed, who="a man")
+    if getattr(args, "auto_desc", False):
+        # Benchmark mode: the VLM writes the description instead of the analyst.
+        from halfface import describe as hf_describe
+
+        auto_text, auto_meta = hf_describe.from_image(ev)
+        print(f"[{name}] auto-desc ({auto_meta}): {auto_text[:120]}...", flush=True)
+        spec = {**spec, "description": auto_text}
     if spec["description"]:
         ev.traits = ""
     print(f"[{name}] evidence: {len(ev.photos)} photo(s), face_px={ev.face_px}, tier={ev.tier}")
@@ -281,6 +288,8 @@ def main() -> None:
     ap.add_argument("--no-engine", action="store_true")
     ap.add_argument("--no-enrich", action="store_true")
     ap.add_argument("--no-desc", action="store_true")
+    ap.add_argument("--auto-desc", action="store_true",
+                    help="VLM (Qwen3-VL) writes the description instead of DESC_*")
     ap.add_argument("--model", default="dev")
     ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--guidance", type=float, default=None)

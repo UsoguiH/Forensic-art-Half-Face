@@ -119,7 +119,7 @@ class GenReq(BaseModel):
     height: int = Field(default=768, ge=256, le=1536)
     public_figure: str | None = Field(default=None, max_length=200)
     gender: str | None = Field(default=None, max_length=16)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class EditReq(BaseModel):
     image: str
@@ -131,7 +131,7 @@ class EditReq(BaseModel):
     seed: int = Field(default=0, ge=0, le=2**31 - 1)
     anchor_signature: list[float] | None = None
     mask: dict[str, Any] | None = None
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class FigureReq(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -1015,13 +1015,13 @@ class ReconstructReq(BaseModel):
     mirror: bool = False
     use_faceid: bool = False
     gender: str | None = Field(default=None, max_length=16)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class BlendReq(BaseModel):
     images: list[str] = Field(min_length=1, max_length=10)
     gender: str | None = Field(default=None, max_length=16)
     reconstruct: bool = False
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class HalfFaceReq(BaseModel):
     """Complete a half-face photo, keeping the supplied half pixel-identical."""
@@ -1033,7 +1033,7 @@ class HalfFaceReq(BaseModel):
     take: str | None = Field(default=None, pattern="^(left|right|top|bottom)$")
     gender: str | None = Field(default=None, max_length=16)
     prompt: str | None = Field(default=None, max_length=1200)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
     seed: int = Field(default=7, ge=0, le=2**31 - 1)
     steps: int | None = Field(default=None, ge=1, le=50)
     guidance: float | None = Field(default=None, ge=0.0, le=20.0)
@@ -1239,6 +1239,19 @@ def _frontalize_profile(
         who=_gender_phrase(req.gender).rstrip(", "),
     )
     description = (req.description or "").strip()
+    description_meta: dict[str, Any] = {"source": "analyst" if description else "none"}
+    if (
+        not description
+        # default ON since 2026-08-06: bench gate passed (VLM mean 0.5748 vs
+        # hand-written 0.5484 on beard/pair4-c/man-cctv2, VLM won all three)
+        and os.environ.get("FACELAB_AUTODESCRIBE", "1").strip() == "1"
+        and not getattr(ENGINE, "is_mock", False)
+    ):
+        # Auto-fill the examiner field from the evidence photos (Qwen3-VL).
+        # An empty result falls straight back to today's no-description path.
+        from halfface import describe as hf_describe
+
+        description, description_meta = hf_describe.from_image(ev)
     if description:
         # The examiner description owns age/build wording; a conflicting
         # detector age estimate in `traits` would fight it inside the prompt.
@@ -1300,6 +1313,11 @@ def _frontalize_profile(
         "tier": result.tier,
         "n_extra_photos": len(ev.photos) - 1,
         "enriched": result.enriched,
+        # The identity notes actually used, and who wrote them ("analyst" |
+        # "vlm" | "none") — surfaced so the UI can show/override the text.
+        "description": description,
+        "description_source": description_meta.get("source", "none"),
+        "description_meta": description_meta,
         "stage": result.winner.style,
         "seed_used": result.winner.seed,
         "candidates": candidates,

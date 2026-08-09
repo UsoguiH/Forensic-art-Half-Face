@@ -35,9 +35,15 @@ from PIL import Image
 SYNC_URL = "https://fal.run"
 QUEUE_URL = "https://queue.fal.run"
 
-# FLUX.2 [dev] first — it is the model the forensic flow is tuned for. klein 9B
-# is the documented fallback when dev is unavailable on the account.
-EDIT_MODELS = ("fal-ai/flux-2/edit", "fal-ai/flux-2/klein/9b/edit")
+# FLUX.2 [dev] is the production engine (user decision 2026-08-09: FLUX.2 dev +
+# Qwen3-VL descriptions only — the offline lab renders FLUX). klein 9B is the
+# fallback when dev is unavailable. Qwen-Image-Edit-2511 stays addressable by
+# the explicit short name "qwen" for benchmarking (it measured higher on the
+# 2026-08-06 shoot-out and shares the same request body shape) but is NOT in
+# the default chain.
+QWEN_EDIT = "fal-ai/qwen-image-edit-2511"
+FLUX_EDIT = "fal-ai/flux-2/edit"
+EDIT_MODELS = (FLUX_EDIT, "fal-ai/flux-2/klein/9b/edit")
 IMAGE_MODELS = ("fal-ai/flux-2", "fal-ai/flux-2/klein/9b")
 
 # fal rejects any side outside this range; FLUX likes multiples of 32.
@@ -104,13 +110,17 @@ def _with_override(override: str, defaults: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def resolve_slug(model: str | None, defaults: tuple[str, ...]) -> str:
-    """Accept a full fal slug, or the UI's short 'dev' / 'klein' names."""
+    """Accept a full fal slug, or the UI's short 'qwen' / 'dev' / 'klein' names."""
     model = (model or "").strip()
     if not model:
         return defaults[0]
     short = model.lower()
+    if short in ("qwen", "qwen2511", "qwen-2511", "qwen-image-edit", "2511"):
+        return QWEN_EDIT
     if short in ("dev", "flux2", "flux-2", "flux.2"):
-        return defaults[0]
+        # 'dev' must keep meaning FLUX.2 [dev] even though qwen now leads the
+        # edit chain; for the t2i chain defaults[0] is still FLUX.2 itself.
+        return next((d for d in defaults if "flux-2" in d and "klein" not in d), defaults[0])
     if short in ("klein", "klein9b", "klein-9b", "flux2-klein", "flux.2-klein"):
         return defaults[-1]
     return model
