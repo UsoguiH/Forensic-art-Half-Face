@@ -56,6 +56,14 @@ services:
       OPENROUTER_IMAGE_MODEL: ${OPENROUTER_IMAGE_MODEL:-black-forest-labs/flux.2-pro}
       OPENROUTER_EDIT_MODEL: ${OPENROUTER_EDIT_MODEL:-google/gemini-2.5-flash-image}
       OPENROUTER_TIMEOUT: ${OPENROUTER_TIMEOUT:-300}
+      # VLM auto-description (independent of FACELAB_PROVIDER: fal can draw
+      # the pixels while the VLM reads the face). Point FACELAB_VLM_BASE_URL
+      # at a lab vLLM/SGLang server later; nothing else changes.
+      FACELAB_AUTODESCRIBE: ${FACELAB_AUTODESCRIBE:-1}
+      FACELAB_VLM_BASE_URL: ${FACELAB_VLM_BASE_URL:-https://openrouter.ai/api/v1}
+      FACELAB_VLM_MODEL: ${FACELAB_VLM_MODEL:-qwen/qwen3-vl-32b-instruct}
+      FACELAB_VLM_KEY: ${FACELAB_VLM_KEY:-}
+      FACELAB_VLM_TIMEOUT: ${FACELAB_VLM_TIMEOUT:-60}
       # Remote FLUX server (lab machine). Used when FACELAB_PROVIDER=lab; all
       # generation/editing runs there and this container needs no weights.
       FLUX_API_URL: ${FLUX_API_URL:-http://host.docker.internal:8000}
