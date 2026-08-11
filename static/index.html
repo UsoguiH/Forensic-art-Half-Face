@@ -133,6 +133,19 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
 .candCard.sel{border-color:#e8a33d;box-shadow:0 0 0 2px rgba(232,163,61,.35),0 8px 20px rgba(0,0,0,.5)}
 .candCard img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
 .candPick{position:absolute;top:6px;right:6px;background:rgba(232,163,61,.92);color:#1a1204;font-weight:800;font-size:10px;padding:2px 7px;border-radius:999px}
+.hfCompare{display:none;gap:9px;margin-top:13px;align-items:center;justify-content:center}
+.hfCompare .cmpCol{flex:0 0 calc((100% - 18px)/3);position:relative;border-radius:12px;overflow:hidden;border:2px solid #2a3245;background:#0d1017;transition:border-color .2s ease}
+.hfCompare .cmpCol.res{border-color:#e8a33d;box-shadow:0 0 0 2px rgba(232,163,61,.28),0 10px 26px rgba(0,0,0,.45)}
+.hfCompare img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.hfCompare .cmpLbl{position:absolute;top:6px;right:6px;background:rgba(5,8,14,.82);color:#dfe6f3;font-weight:800;font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid #ffffff22;backdrop-filter:blur(4px)}
+.hfCompare .cmpCol.res .cmpLbl{background:rgba(232,163,61,.94);color:#1a1204;border:none}
+.hfCompare .cmpArrow{align-self:center;font-size:18px;color:#e8a33d;text-shadow:0 0 14px rgba(232,163,61,.55);flex:0 0 auto;animation:hfPulse 1.8s ease-in-out infinite}
+@keyframes hfPulse{0%,100%{transform:translateX(0);opacity:.75}50%{transform:translateX(-4px);opacity:1}}
+.genThink{display:none;align-items:center;gap:9px;margin-top:12px;padding:6px 2px}
+.genThink .gtDot{width:8px;height:8px;border-radius:50%;background:#aab2c0;animation:gtPulse 1.1s ease-in-out infinite;flex:0 0 auto}
+.genThink .gtText{font-size:13px;font-weight:500;color:transparent;background:linear-gradient(90deg,#6b7280 30%,#e8eaee 50%,#6b7280 70%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;animation:gtShimmer 2s linear infinite}
+@keyframes gtPulse{0%,100%{transform:scale(.72);opacity:.45}50%{transform:scale(1);opacity:1}}
+@keyframes gtShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .compare{position:relative;margin-top:13px;border:1px solid var(--line);border-radius:14px;overflow:hidden;aspect-ratio:2/1;display:none;direction:ltr}
 .compare canvas{position:absolute;top:0;left:0;height:100%;width:100%;object-fit:cover}
 .compare .seam{position:absolute;top:0;bottom:0;width:2px;background:#fff;box-shadow:0 0 12px #fff;left:50%}
@@ -391,7 +404,7 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
         <div class="reconBox">
           <div class="galHead">🪞 نصف وجه ← وجه كامل <span class="galCount">— النصف الذي ترفعه يعود كما هو بكسل ببكسل</span></div>
           <div class="reconRow">
-            <label class="filePick" style="margin:0">⬆ نصف صورة<input id="c2halffile" type="file" accept="image/*"></label>
+            <label class="filePick" style="margin:0" title="يمكن اختيار عدة صور لنفس الشخص دفعة واحدة — الأولى هي الأساس والبقية أدلة إضافية تُدمج في بصمة موحّدة أدق للهوية">⬆ نصف صورة (أو عدة صور)<input id="c2halffile" type="file" accept="image/*" multiple></label>
             <select id="c2halfSide" class="galSel">
               <option value="">الجهة: تلقائي</option>
               <option value="left">النصف الأيسر هو المتوفر</option>
@@ -399,10 +412,23 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
               <option value="top">النصف العلوي هو المتوفر</option>
               <option value="bottom">النصف السفلي هو المتوفر</option>
             </select>
+            <select id="c2halfN" class="galSel" title="للصور الجانبية (بروفايل): عدد الوجوه المرشحة التي تُولَّد ثم يُرتَّب أفضلها بالبصمة — أكثر = أدق لكن أبطأ وأغلى. عند اختيار أقل من 8 يُولَّد العدد المطلوب بالضبط؛ خيار 8 قد يضيف الخادم فوقه حتى 4 صور تحسين تلقائي للصور الضعيفة (كاميرات المراقبة). لا يؤثر على إكمال نصف الوجه الأمامي.">
+              <option value="8" selected>المرشحون: 8 — الأدق</option>
+              <option value="6">المرشحون: 6</option>
+              <option value="4">المرشحون: 4</option>
+              <option value="2">المرشحون: 2</option>
+              <option value="1">مرشح واحد — الأسرع</option>
+            </select>
             <label class="mirrorChk" title="ارفع صورة كاملة، ويقصّها الخادم بنفسه ثم يقارن النتيجة بالأصل"><input type="checkbox" id="c2halfCut"> صورة كاملة — اقطعها واختبر</label>
             <button class="btn a2" id="c2half" style="padding:8px 14px" disabled>🪞 أكمل الوجه</button>
           </div>
           <div class="hintline" id="c2halfStatus"></div>
+          <div id="genThink" class="genThink"><span class="gtDot"></span><span class="gtText" id="genThinkText">جارٍ التحليل…</span></div>
+          <div id="c2hfCompare" class="hfCompare">
+            <div class="cmpCol"><img id="c2hfInput" alt="الصورة الأصلية"><div class="cmpLbl">📷 صورتك الأصلية</div></div>
+            <div class="cmpArrow">⬅</div>
+            <div class="cmpCol res"><img id="c2hfResult" alt="الوجه المولّد"><div class="cmpLbl">✨ الوجه المُولَّد</div></div>
+          </div>
           <div id="c2halfCands" class="candGrid" style="display:none"></div>
         </div>
         <div class="reconBox">
@@ -1545,6 +1571,43 @@ $("c2recon").onclick = async () => {
 
 /* ---- half face -> whole face, with the supplied half preserved pixel for pixel ---- */
 let halfImage = null;
+let halfExtras = [];
+
+/* Input-vs-result strip: the uploaded photo STAYS on screen next to whatever
+   face is currently adopted, so the viewer always sees the source evidence. */
+function showHfCompare(inputSrc, resultSrc) {
+  $("c2hfInput").src = inputSrc;
+  $("c2hfResult").src = resultSrc;
+  $("c2hfCompare").style.display = "flex";
+}
+function hideHfCompare() {
+  $("c2hfCompare").style.display = "none";
+  $("c2hfInput").removeAttribute("src");
+  $("c2hfResult").removeAttribute("src");
+}
+
+/* ChatGPT-style quiet progress: a pulsing dot + shimmering step text driven by
+   elapsed time (the server call is one long await; ~18s per candidate). */
+let genTimer = null;
+function startGenThink() {
+  const t0 = Date.now();
+  const txt = $("genThinkText");
+  const step = () => {
+    const s = (Date.now() - t0) / 1000;
+    const n = Math.min(8, Math.max(1, Number($("c2halfN")?.value) || 8));
+    if (s < 6) txt.textContent = "جارٍ تحليل الصورة…";
+    else if (s < 160) txt.textContent = `جارٍ توليد المرشحين… ${Math.min(n, 1 + Math.floor((s - 6) / 18))} من ${n}`;
+    else txt.textContent = "جارٍ ترتيب النتائج بالبصمة…";
+  };
+  step();
+  $("genThink").style.display = "flex";
+  genTimer = setInterval(step, 1500);
+}
+function stopGenThink() {
+  if (genTimer) clearInterval(genTimer);
+  genTimer = null;
+  $("genThink").style.display = "none";
+}
 
 /* All frontalization candidates, best first, as a clickable gallery: the star
    marks the automatic ArcFace pick, and one click adopts any other candidate. */
@@ -1569,6 +1632,7 @@ function renderHalfCandidates(result) {
       let signature = null;
       try { signature = (await api.post("/signature", {image: c.image})).signature; } catch (_) {}
       await setCurrent(c.image, signature, "مرشح مختار");
+      if (halfImage) showHfCompare(halfImage, c.image);
       $("c2halfStatus").innerHTML =
         `<b style="color:var(--good)">✔ اعتمدتَ هذا المرشح.</b> اقفل الهوية أو انتقل للبحث به.`;
     };
@@ -1577,14 +1641,19 @@ function renderHalfCandidates(result) {
 }
 
 $("c2halffile").onchange = async event => {
-  const file = event.target.files?.[0]; if (!file) return; event.target.value = "";
+  const files = Array.from(event.target.files || []); if (!files.length) return; event.target.value = "";
   try {
-    halfImage = await fileToDataUrl(file);
+    halfImage = await fileToDataUrl(files[0]);
+    halfExtras = [];
+    for (const f of files.slice(1, 7)) halfExtras.push(await fileToDataUrl(f));
     if (mode !== "studio") setMode("studio");
     await orbShowImage(halfImage);
     $("c2half").disabled = false;
     $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
-    $("c2halfStatus").textContent = "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
+    hideHfCompare();
+    $("c2halfStatus").textContent = halfExtras.length
+      ? `الصورة الأساسية + ${halfExtras.length} صور إضافية كأدلة هوية — تُدمج كلها في بصمة موحّدة أدق. اضغط «أكمل الوجه».`
+      : "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
   } catch (_) { $("c2halfStatus").textContent = "تعذّر قراءة الصورة."; }
 };
 $("c2half").onclick = async () => {
@@ -1593,16 +1662,24 @@ $("c2half").onclick = async () => {
   if (mode !== "studio") setMode("studio");
   const btn = $("c2half"); btn.disabled = true; const orig = btn.textContent; btn.textContent = "⏳ جارٍ الإكمال…";
   $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
-  $("c2halfStatus").textContent =
-    "جارٍ الإكمال… نصف أمامي: توليد واحد (~دقيقة). صورة جانبية: عدة مرشحين يُرتَّبون بالبصمة (قد يستغرق دقائق).";
+  $("c2halfStatus").textContent = "";
+  startGenThink();
   try {
     const side = $("c2halfSide").value || null;
-    const body = {image: halfImage, gender: segVal("c2gender", "data-g") || null, model: engineModel || undefined};
+    const body = {
+      image: halfImage,
+      gender: segVal("c2gender", "data-g") || null,
+      model: engineModel || undefined,
+      candidates: Math.min(8, Math.max(1, Number($("c2halfN").value) || 8)),
+      extra_images: halfExtras,
+    };
     // The cut-and-test path needs to know which half to keep; auto has no meaning there.
     if ($("c2halfCut").checked) body.take = side || "left"; else body.side = side;
     const result = await api.post("/half_face", body);
     const label = result.method === "frontalized" ? "وجه أمامي من صورة جانبية" : "وجه مكتمل من نصف";
     await setCurrent(result.image, result.signature, label);
+    if (result.method === "already-complete") hideHfCompare();
+    else showHfCompare(halfImage, result.image);
 
     if (result.method === "frontalized") {
       // The upload was a side-profile photo, not half of a frontal picture —
@@ -1614,6 +1691,15 @@ $("c2half").onclick = async () => {
       if (sim != null) bits.push(`تشابه البصمة مع الصورة الجانبية ${(sim * 100).toFixed(1)}%`);
       const tried = (result.candidates || []).length;
       if (tried > 1) bits.push(`أفضل نتيجة من ${tried} مرشحين`);
+      const asked = Math.min(8, Math.max(1, Number($("c2halfN")?.value) || 8));
+      const dups = Number(result.duplicates_removed || 0);
+      if (tried > 0 && tried < asked) {
+        const reasons = dups > 0
+          ? `${dups} نسخ متطابقة${asked - tried > dups ? " والبقية رأس غير أمامي أو أكثر من وجه" : ""}`
+          : "رأس غير أمامي أو أكثر من وجه";
+        bits.push(`استُبعد ${asked - tried} تلقائياً (${reasons})`);
+      }
+      if (result.n_extra_photos > 0) bits.push(`بصمة مدمجة من ${result.n_extra_photos + 1} صور`);
       bits.push(`${result.render?.model || ""} · ${result.seconds}ث`);
       $("c2halfStatus").innerHTML =
         `<b style="color:var(--good)">✔ الصورة المرفوعة جانبية (بروفايل) — وُلِّد وجه أمامي كامل لنفس الشخص.</b>` +
@@ -1644,7 +1730,7 @@ $("c2half").onclick = async () => {
     $("c2halfStatus").innerHTML = `${exact}<br><span style="color:#7f8ca3">${esc(bits.join(" · "))}</span>`;
   } catch (error) {
     $("c2halfStatus").innerHTML = `<span style="color:#ff7b8b">فشل الإكمال: ${esc(error.message)}</span>`;
-  } finally { btn.disabled = false; btn.textContent = orig; }
+  } finally { stopGenThink(); btn.disabled = false; btn.textContent = orig; }
 };
 
 /* ---- blend up to 10 photos of one person into a robust identity (paper idea) ---- */

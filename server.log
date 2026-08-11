@@ -1,0 +1,108 @@
+INFO:     Started server process [26968]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+C:\Python313\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py:147: UserWarning: Specified provider 'CUDAExecutionProvider' is not in available provider names.Available providers: 'AzureExecutionProvider, CPUExecutionProvider'
+  warnings.warn(
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: C:\Users\adelx/.insightface\models\buffalo_l\1k3d68.onnx landmark_3d_68 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: C:\Users\adelx/.insightface\models\buffalo_l\2d106det.onnx landmark_2d_106 ['None', 3, 192, 192] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: C:\Users\adelx/.insightface\models\buffalo_l\det_10g.onnx detection [1, 3, '?', '?'] 127.5 128.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: C:\Users\adelx/.insightface\models\buffalo_l\genderage.onnx genderage ['None', 3, 96, 96] 0.0 1.0
+Applied providers: ['CPUExecutionProvider'], with options: {'CPUExecutionProvider': {}}
+find model: C:\Users\adelx/.insightface\models\buffalo_l\w600k_r50.onnx recognition ['None', 3, 112, 112] 127.5 127.5
+set det-size: (640, 640)
+INFO:     127.0.0.1:6042 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6044 - "GET /health HTTP/1.1" 200 OK
+C:\Python313\Lib\site-packages\insightface\utils\face_align.py:23: FutureWarning: `estimate` is deprecated since version 0.26 and will be removed in version 2.2. Please use `SimilarityTransform.from_estimate` class constructor instead.
+  tform.estimate(lmk, dst)
+INFO:     127.0.0.1:19722 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:10177 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:9663 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19899 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19899 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:19899 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41710 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52663 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22879 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33123 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33123 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:33123 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:16628 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:25477 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:26911 - "POST /edit HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47867 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47867 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47867 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:25900 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35519 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35519 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35519 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:5699 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4624 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4624 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:4624 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57935 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2961 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2961 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2961 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39900 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:15021 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3431 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3431 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3431 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:18008 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47505 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42122 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42122 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42122 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6148 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:6148 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:20016 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:20016 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:20016 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49930 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:3203 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46056 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46056 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46056 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44034 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44034 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44034 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13426 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13426 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:13426 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:30622 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:41480 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:5317 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42621 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42621 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42621 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1222 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46072 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7538 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7538 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7538 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52316 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:31708 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39375 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39375 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39375 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39375 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39375 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1921 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1921 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:1921 - "GET /gallery/list HTTP/1.1" 200 OK
+INFO:     127.0.0.1:27413 - "POST /half_face HTTP/1.1" 200 OK
+INFO:     127.0.0.1:5957 - "POST /signature HTTP/1.1" 200 OK
+INFO:     127.0.0.1:27675 - "POST /generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35325 - "POST /generate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54870 - "POST /generate HTTP/1.1" 200 OK

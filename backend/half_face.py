@@ -284,8 +284,15 @@ def classify(
     - ``"profile"``  a complete head seen from the side (tiny interocular span, or
                      the nose far off the eye midpoint) — must be frontalized, not
                      mirrored.
-    - ``"full"``     a complete frontal face well inside the frame — there is no
+    - ``"full"``     a complete frontal face inside the frame — there is no
                      missing half to generate.
+
+    Pose is judged from the keypoints whenever the detector produced them,
+    however small the face: a 60 px head in a far surveillance frame carries
+    perfectly usable pose keypoints, and sending it down the mirror pipeline
+    because it is *small* builds a two-faced canvas out of a whole street.  A
+    size floor only ever meant "nothing usable was detected", so it now applies
+    only in exactly that case.
     """
     arr = np.asarray(image.convert("RGB"))
     for axis in ("x", "y"):
@@ -308,7 +315,7 @@ def classify(
         a = max(0.0, x1 - x0) * max(0.0, y1 - y0)
         if a > area:
             best, area = face, a
-    if best is None or area < width * height * 0.02:
+    if best is None:
         return "half", {"reason": "no-face"}
     kps = getattr(best, "kps", None)
     if kps is None or len(kps) < 3:
@@ -319,10 +326,22 @@ def classify(
     eye_span = abs(float(re[0] - le[0]))
     eye_frac = eye_span / max(1.0, x1 - x0)
     nose_off = abs(float(nose[0]) - (float(le[0]) + float(re[0])) / 2.0) / max(eye_span, 1e-3)
-    stats = {"eye_span_frac": round(eye_frac, 3), "nose_offset": round(nose_off, 2)}
+    face_frac = area / max(1.0, float(width * height))
+    stats = {
+        "eye_span_frac": round(eye_frac, 3),
+        "nose_offset": round(nose_off, 2),
+        "face_frac": round(face_frac, 4),
+        "face_px": [round(x1 - x0), round(y1 - y0)],
+    }
 
-    # A face whose box hugs an image border IS a half: the cut runs through it.
-    if x0 <= width * 0.04 or x1 >= width * 0.96 or y0 <= height * 0.04 or y1 >= height * 0.96:
+    # A face whose box hugs an image border IS a half — the cut runs through
+    # it — but only when the face fills a real share of the frame, which is
+    # what an actual cropped-half upload looks like.  A far-away subject who
+    # happens to stand at the frame's edge is not half a face.
+    filling = max((x1 - x0) / width, (y1 - y0) / height) >= 0.25
+    if filling and (
+        x0 <= width * 0.04 or x1 >= width * 0.96 or y0 <= height * 0.04 or y1 >= height * 0.96
+    ):
         return "half", {"reason": "face-at-border", **stats}
     # Frontal faces measure eye_frac ≈ 0.38-0.48 and nose_off < 0.25; a head
     # turned far enough that mirroring is nonsense collapses the eye span and

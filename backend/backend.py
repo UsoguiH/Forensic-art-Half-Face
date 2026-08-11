@@ -119,7 +119,7 @@ class GenReq(BaseModel):
     height: int = Field(default=768, ge=256, le=1536)
     public_figure: str | None = Field(default=None, max_length=200)
     gender: str | None = Field(default=None, max_length=16)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class EditReq(BaseModel):
     image: str
@@ -131,7 +131,7 @@ class EditReq(BaseModel):
     seed: int = Field(default=0, ge=0, le=2**31 - 1)
     anchor_signature: list[float] | None = None
     mask: dict[str, Any] | None = None
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class FigureReq(BaseModel):
     name: str = Field(min_length=1, max_length=200)
@@ -235,7 +235,9 @@ def root():
     index = STATIC_DIR / "index.html"
     if not index.exists():
         raise HTTPException(status_code=404, detail=f"Frontend not found at {index}")
-    return FileResponse(index)
+    # no-cache: the browser must revalidate, so UI changes reach users without
+    # a hard refresh (ETag still lets an unchanged file come back as a 304).
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 @app.get("/health")
 def health():
@@ -559,6 +561,14 @@ def edit(req: EditReq):
     except ValueError as exc:
         raise fail(exc, 422) from exc
     except Exception as exc:
+        if "content_policy_violation" in str(exc):
+            raise fail(
+                ValueError(
+                    "رفض مزوّد الصور هذا الوصف (فلتر المحتوى). "
+                    "أعد صياغة التعليمات بكلمات أخف — مثلاً بدون ذكر الدم — وحاول مجدداً."
+                ),
+                422,
+            ) from exc
         raise fail(exc) from exc
 
 def _mean_query(images: list[Image.Image]) -> tuple[np.ndarray, int]:
@@ -1015,13 +1025,13 @@ class ReconstructReq(BaseModel):
     mirror: bool = False
     use_faceid: bool = False
     gender: str | None = Field(default=None, max_length=16)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class BlendReq(BaseModel):
     images: list[str] = Field(min_length=1, max_length=10)
     gender: str | None = Field(default=None, max_length=16)
     reconstruct: bool = False
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
 
 class HalfFaceReq(BaseModel):
     """Complete a half-face photo, keeping the supplied half pixel-identical."""
@@ -1033,7 +1043,7 @@ class HalfFaceReq(BaseModel):
     take: str | None = Field(default=None, pattern="^(left|right|top|bottom)$")
     gender: str | None = Field(default=None, max_length=16)
     prompt: str | None = Field(default=None, max_length=1200)
-    model: str | None = Field(default=None, pattern="^(dev|klein)$")
+    model: str | None = Field(default=None, pattern="^(qwen|dev|klein)$")
     seed: int = Field(default=7, ge=0, le=2**31 - 1)
     steps: int | None = Field(default=None, ge=1, le=50)
     guidance: float | None = Field(default=None, ge=0.0, le=20.0)
@@ -1047,6 +1057,15 @@ class HalfFaceReq(BaseModel):
     # across the two prompt styles (see faceid_reconstruct2). 8 = 4 seeds x 2.
     candidates: int = Field(default=8, ge=1, le=8)
     refine: bool = False
+    # MORE photos of the SAME person (other frames, other sessions): the
+    # strongest identity lever measured. They become extra tight-crop
+    # references and their embeddings fuse into the ranking anchor.
+    extra_images: list[str] = Field(default_factory=list, max_length=6)
+    # v7: examiner identity notes — concrete observed facts about THIS person
+    # (face shape, facial-hair pattern, hairline state, eye/nose/lip shape...).
+    # An analyst writes it today; a local VLM can fill it on the lab box. It is
+    # the strongest anti-idealization signal measured; see backend/halfface.
+    description: str | None = Field(default=None, max_length=600)
 
 def _mirror_fill(img: Image.Image, occlusion: str | None) -> Image.Image:
     """Crude symmetric pre-fill: reflect the visible half over the vertical
@@ -1192,70 +1211,204 @@ def _frontalize_profile(
     req: HalfFaceReq, image: Image.Image, pose: dict[str, Any],
     truth: Image.Image | None = None,
 ) -> dict[str, Any]:
-    """A side-profile photo is a complete head, not half of a frontal portrait —
-    mirroring it builds a two-faced canvas. Run the identity-first reconstruction
-    instead (faceid_reconstruct2): a prompt-diverse candidate pool ranked against
-    the fused profile+mirror identity. No pixel of the result can be guaranteed,
-    so ``pixel_exact`` is honestly False here."""
-    import faceid_reconstruct2 as f2
+    """v7 "Witness" route (backend/halfface package): a side-profile photo is a
+    complete head, not half of a frontal portrait — mirroring it builds a
+    two-faced canvas. Normalize the scene to a head-and-shoulders crop, render
+    a described ID-portrait candidate pool (pose block → per-subject identity
+    notes → anti-idealization block), gate out pose-clones, rank against the
+    fused quality-weighted evidence anchor, and on the evidence-poor CCTV tier
+    run the draft-as-reference enrichment chain (depth 2, dedicated seeds —
+    the v5 empty-slice crash is structurally impossible here). No pixel of the
+    result can be guaranteed, so ``pixel_exact`` is honestly False."""
+    from halfface import build_evidence
+    from halfface.pipeline import Options, reconstruct_frontal
 
     render = _half_face_renderer(req, low_guidance=False)
 
+    detector = None
     embed = None
     if not getattr(ENGINE, "is_mock", False):
+        def detector(img):
+            with MODEL_LOCK:
+                return ENGINE.detect_faces(img)
+
         def embed(img):
             with MODEL_LOCK:
                 return ENGINE.signature(img)
 
-    # ``candidates`` counts the whole pool; it is split across the two prompt
-    # styles (descriptive studio + scene-preserving) measured in the battery.
-    per_style = max(1, req.candidates // 2)
-    result = f2.reconstruct(
-        image,
-        renderer=render,
-        embed=embed,
-        seeds=f2.DEFAULT_SEEDS[:per_style],
-        who=_gender_phrase(req.gender).rstrip(", "),
-        extra_prompt=req.prompt or "",
-    )
+    extras: list[Image.Image] = []
+    for data_url in req.extra_images:
+        try:
+            extras.append(from_data_url(data_url))
+        except Exception:
+            continue
 
-    out = result["image"]
+    ev = build_evidence(
+        image, extras,
+        detector=detector or (lambda _i: []), embed=embed,
+        who=_gender_phrase(req.gender).rstrip(", "),
+    )
+    description = (req.description or "").strip()
+    description_meta: dict[str, Any] = {"source": "analyst" if description else "none"}
+    if (
+        not description
+        # default ON since 2026-08-06: bench gate passed (VLM mean 0.5748 vs
+        # hand-written 0.5484 on beard/pair4-c/man-cctv2, VLM won all three)
+        and os.environ.get("FACELAB_AUTODESCRIBE", "1").strip() == "1"
+        and not getattr(ENGINE, "is_mock", False)
+    ):
+        # Auto-fill the examiner field from the evidence photos (Qwen3-VL).
+        # An empty result falls straight back to today's no-description path.
+        from halfface import describe as hf_describe
+
+        description, description_meta = hf_describe.from_image(ev)
+    if description:
+        # The examiner description owns age/build wording; a conflicting
+        # detector age estimate in `traits` would fight it inside the prompt.
+        ev.traits = ""
+
+    opts = Options(
+        candidates=req.candidates,
+        description=description,
+        extra_prompt=req.prompt or "",
+        # Auto-enrichment (evidence-poor tier, up to 4 extra renders) only at
+        # the full default pool: a user who explicitly lowered the candidate
+        # count asked for exactly that many renders — honor it.
+        enrich=False if (getattr(ENGINE, "is_mock", False) or req.candidates < 8) else None,
+    )
+    result = reconstruct_frontal(ev, renderer=render, detector=detector, embed=embed, opts=opts)
+
+    # ---- post-filter: the deliverable is ONE forward-facing head -----------
+    # (demo-branch feature, ported through the v8 merge.) Two failure modes
+    # seen in the field: (a) collage renders that embed extra profile views
+    # beside the face, (b) renders that kept the head turned. Both are dropped
+    # from the pool and the grid, and the pick is re-run over the survivors.
+    # If nothing survives, the original pool ships untouched — a bad grid
+    # beats an empty one.
+    def _one_frontal_face(img: Image.Image) -> bool:
+        if detector is None:
+            return True
+        try:
+            faces = detector(img) or []
+        except Exception:
+            return True
+        if len(faces) != 1:
+            return False
+        face = faces[0]
+        try:
+            kps = np.asarray(face.kps, dtype=np.float32)
+            x0, _, x1, _ = (float(v) for v in face.bbox[:4])
+            left_eye, right_eye, nose = kps[0], kps[1], kps[2]
+            gap = abs(float(right_eye[0]) - float(left_eye[0]))
+            if gap < 1e-3:
+                return False
+            centred = 1.0 - min(1.0, abs(
+                float(nose[0]) - (float(left_eye[0]) + float(right_eye[0])) / 2.0
+            ) / (gap / 2.0))
+            spread = min(1.0, (gap / max(1.0, x1 - x0)) / 0.34)
+            return min(centred, spread) >= 0.55
+        except Exception:
+            return True
+
+    survivors = [c for c in result.candidates if _one_frontal_face(c.image)]
+    if survivors and len(survivors) < len(result.candidates):
+        result.candidates = survivors
+        if result.winner not in survivors:
+            pool = [c for c in survivors if not c.gated] or survivors
+            result.winner = max(
+                pool,
+                key=lambda c: (
+                    c.sim_fused if (ev.multi and c.sim_fused is not None)
+                    else (c.min_both if c.min_both is not None else -1.0)
+                ),
+            )
+
+    # ---- dedup: two renders of the same effective take add zero information
+    # to the grid and cost a card each. Winner first, so it always survives.
+    # 64×64 gray thumbs, mean-abs-diff threshold: measured distinct takes sit
+    # ≥ 15, same-take re-renders (enrichment copies of the champion, same-seed
+    # arms) land well under 8 — 2.0 was too strict and let lookalikes through.
+    try:
+        dedup_diff = float(os.environ.get("FACELAB_DEDUP_DIFF", "8"))
+    except Exception:
+        dedup_diff = 8.0
+    duplicates_removed = 0
+    if len(result.candidates) > 1 and dedup_diff > 0:
+        ordered = sorted(result.candidates, key=lambda c: c is not result.winner)
+        kept, thumbs = [], []
+        for c in ordered:
+            thumb = np.asarray(c.image.convert("L").resize((64, 64)), dtype=np.float32)
+            if any(float(np.abs(thumb - seen).mean()) < dedup_diff for seen in thumbs):
+                continue
+            kept.append(c)
+            thumbs.append(thumb)
+        duplicates_removed = len(result.candidates) - len(kept)
+        if duplicates_removed:
+            result.candidates = kept
+
+    out = result.winner.image
     signature = None
-    identity = {}
+    identity: dict[str, Any] = {}
     if embed is not None:
         with MODEL_LOCK:
             signature = ENGINE.signature(out)
             truth_vec = ENGINE.signature(truth) if truth is not None else None
         identity = {
-            "vs_supplied_half": result["sim_profile"],
+            "vs_supplied_half": (
+                result.winner.sim_fused if ev.multi else result.winner.min_both
+            ),
             "vs_reference": ENGINE.similarity(signature, truth_vec),
         }
+
     # Every candidate travels to the UI so the user can overrule the ArcFace
-    # pick with their own eyes. JPEG rather than lossless: 6 full-size PNGs
-    # would weigh megabytes and none of these carries a pixel-exact guarantee.
-    candidates = [
-        {
-            **meta,
-            "image": to_data_url(img, quality=90),
-            "picked": meta["stage"] == result["stage"] and meta["seed"] == result["seed"],
-        }
-        for meta, img in zip(result["candidates"], result["candidate_images"])
-    ]
+    # pick with their own eyes — at CCTV anchor quality the ranking's rank-1
+    # vs rank-3 is a coin flip, so the human look IS part of the pipeline.
+    # Legacy keys (stage/round/rank_score/sim_profile) ride along for the UI.
+    candidates = []
+    for c in result.candidates:
+        m = c.meta()
+        m.pop("suspicious", None)
+        m.pop("gate_reason", None)
+        m.update({
+            "stage": c.style,
+            "round": "base" if c.layout in ("std", "grid") else c.layout,
+            "rank_score": m.get("min_both"),
+            "sim_profile": m.get("sim_fused"),
+        })
+        candidates.append({
+            **m,
+            "image": to_data_url(c.image, quality=90),
+            "picked": c is result.winner,
+        })
+
+    ledger = result.ledger.summary() if result.ledger else {}
     return {
         "image": to_data_url(out, lossless=True),
-        "half": to_data_url(image, lossless=True),
+        "half": to_data_url(ev.working, lossless=True),
         "signature": vec_list(signature),
         "pixel_exact": False,
         "method": "frontalized",
+        "engine": "halfface-v7",
         "pose": pose,
-        "stage": result["stage"],
-        "seed_used": result["seed"],
+        "normalize": ev.crop_meta,
+        "tier": result.tier,
+        "n_extra_photos": len(ev.photos) - 1,
+        "enriched": result.enriched,
+        # The identity notes actually used, and who wrote them ("analyst" |
+        # "vlm" | "none") — surfaced so the UI can show/override the text.
+        "description": description,
+        "description_source": description_meta.get("source", "none"),
+        "description_meta": description_meta,
+        "stage": result.winner.style,
+        "seed_used": result.winner.seed,
+        "duplicates_removed": duplicates_removed,
         "candidates": candidates,
         "identity": identity,
-        "render": result["render"],
-        "seconds": result["seconds"],
+        "render": {**result.winner.render_meta, "ledger": ledger},
+        "seconds": ledger.get("seconds", 0),
         "mock": getattr(ENGINE, "is_mock", False),
     }
+
 
 @app.post("/half_face")
 def half_face(req: HalfFaceReq):
