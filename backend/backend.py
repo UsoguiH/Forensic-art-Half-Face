@@ -559,6 +559,14 @@ def edit(req: EditReq):
     except ValueError as exc:
         raise fail(exc, 422) from exc
     except Exception as exc:
+        if "content_policy_violation" in str(exc):
+            raise fail(
+                ValueError(
+                    "رفض مزوّد الصور هذا الوصف (فلتر المحتوى). "
+                    "أعد صياغة التعليمات بكلمات أخف — مثلاً بدون ذكر الدم — وحاول مجدداً."
+                ),
+                422,
+            ) from exc
         raise fail(exc) from exc
 
 def _mean_query(images: list[Image.Image]) -> tuple[np.ndarray, int]:

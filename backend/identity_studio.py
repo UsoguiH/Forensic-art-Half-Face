@@ -691,15 +691,16 @@ class IdentityStudio:
             return 0.55
 
     def _region_steps(self, steps: int) -> int:
-        """A local inpaint converges in far fewer steps than a full generation.
-        Klein is already 4-step distilled; only the heavy dev model is capped.
-        This is the main time saver for region edits."""
+        """Region edits used to be capped at 8 steps to save time, but this path
+        is a full crop re-render, not a mask-conditioned inpaint — dev needs its
+        ~28 steps or the patch comes back under-converged: a blurred grey smudge
+        where the requested edit should be. Cap stays overridable for speed runs."""
         steps = max(1, int(steps))
         if self.model_kind == "dev" or self.remote:
             try:
-                cap = int(os.environ.get("FACELAB_REGION_STEPS", "8"))
+                cap = int(os.environ.get("FACELAB_REGION_STEPS", "28"))
             except Exception:
-                cap = 8
+                cap = 28
             return max(1, min(steps, cap))
         return steps
 
@@ -788,8 +789,11 @@ class IdentityStudio:
         y0 = box["y"] * H
         x1 = (box["x"] + box["w"]) * W
         y1 = (box["y"] + box["h"]) * H
-        pad_x = max(24.0, (x1 - x0) * padding)
-        pad_y = max(24.0, (y1 - y0) * padding)
+        # Floor raised from 24px: a tiny brush blob with 24px of context gives
+        # the model almost no face to anchor on, and it renders incoherent
+        # texture. ~96px of surrounding face keeps small-blob edits realistic.
+        pad_x = max(96.0, (x1 - x0) * padding)
+        pad_y = max(96.0, (y1 - y0) * padding)
         return (
             max(0, int(x0 - pad_x)),
             max(0, int(y0 - pad_y)),
@@ -841,6 +845,20 @@ class IdentityStudio:
         alpha = hard.filter(ImageFilter.GaussianBlur(radius=feather))
 
         alpha = ImageChops.multiply(alpha, hard)
+
+        if os.environ.get("FACELAB_REGION_GATE", "1") != "0":
+            # Delta gate: the model repaints ALL skin inside the selection, and
+            # repainted skin never quite matches — a big selection reads as a
+            # visible tone rectangle. Composite only where the render actually
+            # changed something (the wound, the mouth), keep the original pixels
+            # everywhere else inside the selection. Soft ramp, so faint edits
+            # fade rather than snap; the blur spreads the gate past change edges.
+            diff = ImageChops.difference(edited_full, original).convert("L")
+            diff = diff.filter(ImageFilter.GaussianBlur(radius=max(3, feather // 2)))
+            lo, hi = 6, 36
+            gate = diff.point([max(0, min(255, (v - lo) * 255 // (hi - lo))) for v in range(256)])
+            alpha = ImageChops.multiply(alpha, gate)
+
         return Image.composite(edited_full, original, alpha)
 
     def edit(
@@ -880,6 +898,7 @@ class IdentityStudio:
 
             pipe = self._get_pipe()
         steps = int(steps or self.defaults.steps)
+        guidance_unset = guidance is None
         guidance = float(self.defaults.guidance if guidance is None else guidance)
         instruction = (instruction or "").strip() or "make a subtle natural edit"
 
@@ -892,6 +911,11 @@ class IdentityStudio:
             context_box = self._region_context_box(current.size, bbox, padding=self._region_pad())
             source = current.crop(context_box)
         region_edit = bool(alpha_full is not None and context_box is not None)
+        if region_edit and guidance_unset:
+            # A patch render carries no identity anchor, so instruction adherence
+            # is all that matters here; the 2.5 whole-face default under-delivers
+            # colour/shape changes in a small crop.
+            guidance = max(guidance, 4.0)
 
         if region_edit:
             fill = self._get_fill_pipe()
@@ -903,12 +927,18 @@ class IdentityStudio:
 
         if region_edit:
 
+            # Scoped, not contradictory: "keep everything unchanged" must apply
+            # OUTSIDE the requested change only, or edits that alter skin/colour
+            # (a wound, makeup, a scar) collapse into a faint smudge — the model
+            # averages "add a wound" against "keep the same skin and colour".
             prompt = (
-                "This image is a small close-up patch cropped from a larger portrait. "
-                f"Apply only this local edit to it: {instruction}. Keep the same skin, "
-                "texture, colour and lighting and change nothing else. Do NOT add, insert, "
-                "replace, shrink or duplicate a face, head, portrait or person — this is only "
-                "a small region of a bigger photo, not a whole face."
+                "This image is a close-up patch cropped from a larger photographic "
+                f"portrait. Requested change (follow it exactly; it may be written "
+                f"in any language): {instruction}. Make the requested change clearly "
+                "visible, photorealistic and crisply detailed. Everything outside "
+                "the requested change keeps the patch's existing skin, texture, "
+                "colour and lighting. Keep the framing exactly as given — render "
+                "this same patch, never a whole face, head or person."
             )
             edit_images = [source]
         else:
@@ -1051,7 +1081,10 @@ def _match_crop_tone(
     original_crop: Image.Image,
     sel_box: tuple[int, int, int, int],
 ) -> Image.Image:
-   
+    """Ring statistics (outside the selection), applied as one linear map to the
+    whole crop: seams stay invisible AND intended colour changes inside the
+    selection survive, because a linear map preserves relative contrast —
+    protecting the selection from the map was tried and reads as a tone patch."""
     edited = np.asarray(edited_crop.convert("RGB"), dtype=np.float32)
     original = np.asarray(
         original_crop.convert("RGB").resize(edited_crop.size), dtype=np.float32
