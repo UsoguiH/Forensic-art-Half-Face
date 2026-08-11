@@ -652,6 +652,106 @@ class IdentityStudio:
         return {"x": x0, "y": y0, "w": max(0.0, x1 - x0), "h": max(0.0, y1 - y0)}
 
     @staticmethod
+    def _masked_change(source: Image.Image, out: Image.Image, crop_mask: Image.Image) -> float:
+        """How visibly the painted area changed: the mean of the TOP-DECILE
+        absolute pixel diffs inside the mask, 0–255 scale.
+
+        Plain mean-over-mask was measured too forgiving (2026-08-10): a wound
+        render that only faintly discoloured 3% of the brush disc averaged 1.8
+        yet a REAL thin cut also averages ~3 — indistinguishable. The top
+        decile separates them: a small-but-strong edit scores 40+, a faint
+        smear stays under ~10, an unchanged patch ~0."""
+        a = np.asarray(source.convert("RGB"), dtype=np.float32)
+        b = np.asarray(out.convert("RGB").resize(source.size, Image.Resampling.LANCZOS),
+                       dtype=np.float32)
+        m = np.asarray(crop_mask.resize(source.size, Image.Resampling.NEAREST),
+                       dtype=np.float32) >= 128.0
+        if int(m.sum()) < 25:
+            return 0.0
+        diffs = np.abs(a - b).mean(axis=2)[m]
+        k = max(25, int(diffs.size * 0.10))
+        return float(np.sort(diffs)[-k:].mean())
+
+    def _region_attempts(
+        self,
+        prompt: str,
+        source: Image.Image,
+        crop_mask: Image.Image,
+        *,
+        model: str | None,
+        width: int,
+        height: int,
+        steps: int,
+        guidance: float | None,
+        guidance_unset: bool,
+        seed: int,
+    ) -> Image.Image:
+        """Render the patch, VERIFY the painted area changed, retry when it didn't.
+
+        Why: a brush edit that renders an unchanged patch (or gets refused by a
+        content filter) used to return the original image with a 200 — the user
+        saw "nothing happened". Now every render is measured with
+        ``_masked_change`` against a floor (FACELAB_REGION_MIN_CHANGE, default
+        12.0 top-decile/255) and the chain escalates: 1) the region model
+        (FACELAB_REGION_MODEL, default qwen — best measured instruction
+        adherence and native Arabic/multilingual), 2) same model, hardened
+        prompt + fresh seed, 3) the other model family. Exceptions (incl.
+        content-policy refusals) just advance the chain. If nothing clears the
+        floor, the attempt that changed the painted area MOST still ships —
+        never a silent no-op unless every attempt errored."""
+        primary = (os.environ.get("FACELAB_REGION_MODEL", "qwen").strip().lower()
+                   or "qwen")
+        explicit = (model or "").strip().lower()
+        if explicit and explicit not in ("dev", "klein"):
+            primary = explicit  # a non-default caller choice wins
+        alt = "dev" if primary != "dev" else "qwen"
+        try:
+            floor = float(os.environ.get("FACELAB_REGION_MIN_CHANGE", "12.0"))
+        except Exception:
+            floor = 12.0
+        harden = (
+            " A previous attempt failed to apply the change. Apply the requested "
+            "change boldly this time — it must be clearly and unmistakably visible "
+            "inside the area it belongs to."
+        )
+        plans = [
+            {"model": primary, "prompt": prompt, "seed": seed},
+            {"model": primary, "prompt": prompt + harden, "seed": seed + 101},
+            {"model": alt, "prompt": prompt + harden, "seed": seed + 202},
+        ]
+        # A selection under ~25px can't be verified (metric guard returns 0) —
+        # escalating on it would burn three renders on an accidental dab.
+        tiny = int((np.asarray(crop_mask.convert("L"), dtype=np.float32) >= 128).sum()) < 25
+        if tiny:
+            plans = plans[:1]
+        best: Image.Image | None = None
+        best_change = -1.0
+        last_exc: Exception | None = None
+        for plan in plans:
+            g = guidance
+            if guidance_unset:
+                # qwen-2511's endpoint default behaves best; forcing FLUX's 4.0
+                # onto it is off-distribution. FLUX patches DO need >= 4.0.
+                g = None if plan["model"] == "qwen" else max(4.0, float(guidance or 0.0))
+            try:
+                out = self._remote_call(
+                    plan["prompt"], images=[source], model=plan["model"],
+                    width=width, height=height, steps=steps,
+                    guidance=g, seed=plan["seed"],
+                )
+            except Exception as exc:
+                last_exc = exc
+                continue
+            change = self._masked_change(source, out, crop_mask)
+            if change >= floor:
+                return out
+            if change > best_change:
+                best, best_change = out, change
+        if best is not None:
+            return best
+        raise last_exc if last_exc else RuntimeError("The region edit produced no render.")
+
+    @staticmethod
     def _mask_alpha(mask, size: tuple[int, int]) -> Image.Image | None:
         """Unify any mask spec into a full-resolution 'L' alpha (255=selected).
 
@@ -691,15 +791,16 @@ class IdentityStudio:
             return 0.55
 
     def _region_steps(self, steps: int) -> int:
-        """A local inpaint converges in far fewer steps than a full generation.
-        Klein is already 4-step distilled; only the heavy dev model is capped.
-        This is the main time saver for region edits."""
+        """Region edits used to be capped at 8 steps to save time, but this path
+        is a full crop re-render, not a mask-conditioned inpaint — dev needs its
+        ~28 steps or the patch comes back under-converged: a blurred grey smudge
+        where the requested edit should be. Cap stays overridable for speed runs."""
         steps = max(1, int(steps))
         if self.model_kind == "dev" or self.remote:
             try:
-                cap = int(os.environ.get("FACELAB_REGION_STEPS", "8"))
+                cap = int(os.environ.get("FACELAB_REGION_STEPS", "28"))
             except Exception:
-                cap = 8
+                cap = 28
             return max(1, min(steps, cap))
         return steps
 
@@ -788,8 +889,11 @@ class IdentityStudio:
         y0 = box["y"] * H
         x1 = (box["x"] + box["w"]) * W
         y1 = (box["y"] + box["h"]) * H
-        pad_x = max(24.0, (x1 - x0) * padding)
-        pad_y = max(24.0, (y1 - y0) * padding)
+        # Floor raised from 24px: a tiny brush blob with 24px of context gives
+        # the model almost no face to anchor on, and it renders incoherent
+        # texture. ~96px of surrounding face keeps small-blob edits realistic.
+        pad_x = max(96.0, (x1 - x0) * padding)
+        pad_y = max(96.0, (y1 - y0) * padding)
         return (
             max(0, int(x0 - pad_x)),
             max(0, int(y0 - pad_y)),
@@ -827,6 +931,14 @@ class IdentityStudio:
             return original
         bx0, by0, bx1, by1 = hard.getbbox()
 
+        # The delta gate MUST be measured on the RAW render: tone-matching pulls
+        # the edit toward the original's statistics, and a gate computed after
+        # it scored real-but-subtle edits (stubble, a faint scar) below its own
+        # floor — the composite then returned the ORIGINAL image while the API
+        # reported success. That was the main "brush edit did nothing" bug.
+        raw_full = original.copy()
+        raw_full.paste(edited_crop, (cx0, cy0))
+
         if os.environ.get("FACELAB_REGION_TONE", "1") != "0":
             edited_crop = _match_crop_tone(
                 edited_crop,
@@ -838,9 +950,30 @@ class IdentityStudio:
         edited_full.paste(edited_crop, (cx0, cy0))
 
         feather = max(5, int(min(max(1, bx1 - bx0), max(1, by1 - by0)) * 0.10))
-        alpha = hard.filter(ImageFilter.GaussianBlur(radius=feather))
+        base_alpha = ImageChops.multiply(
+            hard.filter(ImageFilter.GaussianBlur(radius=feather)), hard
+        )
+        alpha = base_alpha
 
-        alpha = ImageChops.multiply(alpha, hard)
+        # The gate exists to stop a LARGE selection from reading as a repainted
+        # tone rectangle. A small brush blob has no rectangle to show — and the
+        # gate can only hurt it — so it applies to large selections only.
+        W_, H_ = original.size
+        sel_frac = float(np.asarray(hard, dtype=np.float32).sum()) / (255.0 * W_ * H_)
+        if os.environ.get("FACELAB_REGION_GATE", "1") != "0" and sel_frac > 0.06:
+            diff = ImageChops.difference(raw_full, original).convert("L")
+            diff = diff.filter(ImageFilter.GaussianBlur(radius=max(3, feather // 2)))
+            lo, hi = 6, 36
+            gate = diff.point([max(0, min(255, (v - lo) * 255 // (hi - lo))) for v in range(256)])
+            gated = ImageChops.multiply(alpha, gate)
+            # Rescue: if the gate would erase (almost) the whole edit, the model
+            # made a uniform-but-real change the ramp can't see — ship the
+            # ungated composite rather than silently returning the original.
+            g_mass = float(np.asarray(gated, dtype=np.float32).sum())
+            a_mass = float(np.asarray(alpha, dtype=np.float32).sum())
+            if a_mass > 0 and g_mass / a_mass >= 0.05:
+                alpha = gated
+
         return Image.composite(edited_full, original, alpha)
 
     def edit(
@@ -880,6 +1013,7 @@ class IdentityStudio:
 
             pipe = self._get_pipe()
         steps = int(steps or self.defaults.steps)
+        guidance_unset = guidance is None
         guidance = float(self.defaults.guidance if guidance is None else guidance)
         instruction = (instruction or "").strip() or "make a subtle natural edit"
 
@@ -892,6 +1026,11 @@ class IdentityStudio:
             context_box = self._region_context_box(current.size, bbox, padding=self._region_pad())
             source = current.crop(context_box)
         region_edit = bool(alpha_full is not None and context_box is not None)
+        if region_edit and guidance_unset:
+            # A patch render carries no identity anchor, so instruction adherence
+            # is all that matters here; the 2.5 whole-face default under-delivers
+            # colour/shape changes in a small crop.
+            guidance = max(guidance, 4.0)
 
         if region_edit:
             fill = self._get_fill_pipe()
@@ -903,18 +1042,25 @@ class IdentityStudio:
 
         if region_edit:
 
+            # Scoped, not contradictory: "keep everything unchanged" must apply
+            # OUTSIDE the requested change only, or edits that alter skin/colour
+            # (a wound, makeup, a scar) collapse into a faint smudge — the model
+            # averages "add a wound" against "keep the same skin and colour".
             prompt = (
-                "This image is a small close-up patch cropped from a larger portrait. "
-                f"Apply only this local edit to it: {instruction}. Keep the same skin, "
-                "texture, colour and lighting and change nothing else. Do NOT add, insert, "
-                "replace, shrink or duplicate a face, head, portrait or person — this is only "
-                "a small region of a bigger photo, not a whole face."
+                "This image is a close-up patch cropped from a larger photographic "
+                f"portrait. Requested change (follow it exactly; it may be written "
+                f"in any language): {instruction}. Make the requested change clearly "
+                "visible, photorealistic and crisply detailed. Everything outside "
+                "the requested change keeps the patch's existing skin, texture, "
+                "colour and lighting. Keep the framing exactly as given — render "
+                "this same patch, never a whole face, head or person."
             )
             edit_images = [source]
         else:
             prompt = (
                 "Image 1 is the current portrait and image 2 is the identity anchor. "
-                f"Apply this edit to image 1: {instruction}. Preserve the exact person, "
+                f"Apply this edit to image 1 (the request may be written in any "
+                f"language — follow it exactly): {instruction}. Preserve the exact person, "
                 "facial proportions, and recognizable identity from image 2. Keep the result "
                 "photorealistic and do not blend in a different person."
             )
@@ -938,16 +1084,25 @@ class IdentityStudio:
                 return pipe(**kwargs).images[0].convert("RGB")
 
         if self.remote:
-            out = self._remote_call(
-                prompt,
-                images=edit_images,
-                model=model,
-                width=width,
-                height=height,
-                steps=self._region_steps(steps) if region_edit else steps,
-                guidance=guidance,
-                seed=int(seed),
-            )
+            if region_edit and self.provider == "fal":
+                out = self._region_attempts(
+                    prompt, source, alpha_full.crop(context_box),
+                    model=model, width=width, height=height,
+                    steps=self._region_steps(steps),
+                    guidance=guidance, guidance_unset=guidance_unset,
+                    seed=int(seed),
+                )
+            else:
+                out = self._remote_call(
+                    prompt,
+                    images=edit_images,
+                    model=model,
+                    width=width,
+                    height=height,
+                    steps=self._region_steps(steps) if region_edit else steps,
+                    guidance=guidance,
+                    seed=int(seed),
+                )
         else:
             primary = edit_images if self.model_kind == "klein" else [edit_images]
             fallback = [edit_images] if self.model_kind == "klein" else edit_images
@@ -1051,7 +1206,10 @@ def _match_crop_tone(
     original_crop: Image.Image,
     sel_box: tuple[int, int, int, int],
 ) -> Image.Image:
-   
+    """Ring statistics (outside the selection), applied as one linear map to the
+    whole crop: seams stay invisible AND intended colour changes inside the
+    selection survive, because a linear map preserves relative contrast —
+    protecting the selection from the map was tried and reads as a tone patch."""
     edited = np.asarray(edited_crop.convert("RGB"), dtype=np.float32)
     original = np.asarray(
         original_crop.convert("RGB").resize(edited_crop.size), dtype=np.float32

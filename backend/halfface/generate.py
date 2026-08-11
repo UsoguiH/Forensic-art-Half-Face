@@ -29,6 +29,11 @@ from .rank import Candidate, pick, score
 Renderer = Callable[[list[Image.Image], str, int, int, int], "tuple[Image.Image, dict[str, Any]]"]
 
 BASE_SEEDS: tuple[int, ...] = (7, 21, 77, 202)
+# Seed pool for the base arms, sliced DISJOINTLY across arms: reusing
+# BASE_SEEDS[:n] in every arm rendered the same seed under three near-identical
+# prompts, and the seed dominates the render — the 8-card grid carried ~3
+# unique takes and 5 paid duplicates. Values avoid ENRICH_ROUND_SEEDS.
+POOL_SEEDS: tuple[int, ...] = (7, 21, 77, 202, 911, 1493, 2711, 3697)
 ENRICH_ROUND_SEEDS: tuple[tuple[int, ...], ...] = ((42, 101), (301, 555))
 EST_USD_PER_RENDER = 0.06
 OUT_SIZE = (832, 1216)

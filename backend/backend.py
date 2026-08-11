@@ -235,7 +235,9 @@ def root():
     index = STATIC_DIR / "index.html"
     if not index.exists():
         raise HTTPException(status_code=404, detail=f"Frontend not found at {index}")
-    return FileResponse(index)
+    # no-cache: the browser must revalidate, so UI changes reach users without
+    # a hard refresh (ETag still lets an unchanged file come back as a 304).
+    return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 @app.get("/health")
 def health():
@@ -559,6 +561,14 @@ def edit(req: EditReq):
     except ValueError as exc:
         raise fail(exc, 422) from exc
     except Exception as exc:
+        if "content_policy_violation" in str(exc):
+            raise fail(
+                ValueError(
+                    "رفض مزوّد الصور هذا الوصف (فلتر المحتوى). "
+                    "أعد صياغة التعليمات بكلمات أخف — مثلاً بدون ذكر الدم — وحاول مجدداً."
+                ),
+                422,
+            ) from exc
         raise fail(exc) from exc
 
 def _mean_query(images: list[Image.Image]) -> tuple[np.ndarray, int]:
@@ -1261,7 +1271,10 @@ def _frontalize_profile(
         candidates=req.candidates,
         description=description,
         extra_prompt=req.prompt or "",
-        enrich=False if getattr(ENGINE, "is_mock", False) else None,
+        # Auto-enrichment (evidence-poor tier, up to 4 extra renders) only at
+        # the full default pool: a user who explicitly lowered the candidate
+        # count asked for exactly that many renders — honor it.
+        enrich=False if (getattr(ENGINE, "is_mock", False) or req.candidates < 8) else None,
     )
     result = reconstruct_frontal(ev, renderer=render, detector=detector, embed=embed, opts=opts)
 
@@ -1309,6 +1322,29 @@ def _frontalize_profile(
                     else (c.min_both if c.min_both is not None else -1.0)
                 ),
             )
+
+    # ---- dedup: two renders of the same effective take add zero information
+    # to the grid and cost a card each. Winner first, so it always survives.
+    # 64×64 gray thumbs, mean-abs-diff threshold: measured distinct takes sit
+    # ≥ 15, same-take re-renders (enrichment copies of the champion, same-seed
+    # arms) land well under 8 — 2.0 was too strict and let lookalikes through.
+    try:
+        dedup_diff = float(os.environ.get("FACELAB_DEDUP_DIFF", "8"))
+    except Exception:
+        dedup_diff = 8.0
+    duplicates_removed = 0
+    if len(result.candidates) > 1 and dedup_diff > 0:
+        ordered = sorted(result.candidates, key=lambda c: c is not result.winner)
+        kept, thumbs = [], []
+        for c in ordered:
+            thumb = np.asarray(c.image.convert("L").resize((64, 64)), dtype=np.float32)
+            if any(float(np.abs(thumb - seen).mean()) < dedup_diff for seen in thumbs):
+                continue
+            kept.append(c)
+            thumbs.append(thumb)
+        duplicates_removed = len(result.candidates) - len(kept)
+        if duplicates_removed:
+            result.candidates = kept
 
     out = result.winner.image
     signature = None
@@ -1365,6 +1401,7 @@ def _frontalize_profile(
         "description_meta": description_meta,
         "stage": result.winner.style,
         "seed_used": result.winner.seed,
+        "duplicates_removed": duplicates_removed,
         "candidates": candidates,
         "identity": identity,
         "render": {**result.winner.render_meta, "ledger": ledger},

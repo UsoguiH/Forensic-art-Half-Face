@@ -13,6 +13,7 @@ from .evidence import EvidenceSet
 from .generate import (
     BASE_SEEDS,
     OUT_SIZE,
+    POOL_SEEDS,
     Arm,
     Ledger,
     Renderer,
@@ -62,22 +63,42 @@ def default_arms(ev: EvidenceSet, opts: Options) -> list[Arm]:
     Without a description: described-skeleton forensic (pose+anti-idealization
     still help bare) + the proven idportrait fallback.
     """
+    def slice_seeds(cursor: int, n: int) -> "tuple[int, ...]":
+        # Disjoint per-arm seeds. The seed dominates the render, so two arms
+        # sharing seed 7 produce near-identical images despite different
+        # prompts — paid duplicates in the grid. Wraps past the pool with a
+        # large offset so harness runs beyond 8 renders stay unique too.
+        pool = len(POOL_SEEDS)
+        return tuple(
+            POOL_SEEDS[(cursor + j) % pool] + 10007 * ((cursor + j) // pool)
+            for j in range(n)
+        )
+
     if opts.styles:
         per_style = max(1, opts.candidates // len(opts.styles))
-        return [Arm(style=s, seeds=BASE_SEEDS[:per_style]) for s in opts.styles]
-    if opts.description:
-        third = max(1, opts.candidates // 3)
-        rest = max(1, (opts.candidates - third) // 2)
         return [
-            Arm("forensic", BASE_SEEDS[:rest]),
-            Arm("forensicdoc", BASE_SEEDS[:rest]),
-            Arm("idportrait", BASE_SEEDS[:third]),
+            Arm(style=s, seeds=slice_seeds(i * per_style, per_style))
+            for i, s in enumerate(opts.styles)
         ]
-    per_style = max(1, opts.candidates // 2)
-    return [
-        Arm("forensic", BASE_SEEDS[:per_style]),
-        Arm("idportrait", BASE_SEEDS[:per_style]),
-    ]
+    # Round-robin allocation so the pool is EXACTLY opts.candidates renders —
+    # the old thirds/halves arithmetic under- or over-shot every count except
+    # 6 and 8 (candidates=4 with a description rendered 3, candidates=1 bare
+    # rendered 2). At 8 this reproduces the benchmark shape (3/3/2 and 4/4).
+    order = (
+        ("forensic", "forensicdoc", "idportrait")
+        if opts.description
+        else ("forensic", "idportrait")
+    )
+    counts = {style: 0 for style in order}
+    for i in range(max(1, opts.candidates)):
+        counts[order[i % len(order)]] += 1
+    arms: list[Arm] = []
+    cursor = 0
+    for style, n in counts.items():
+        if n:
+            arms.append(Arm(style, slice_seeds(cursor, n)))
+            cursor += n
+    return arms
 
 
 def reconstruct_frontal(
@@ -107,6 +128,11 @@ def reconstruct_frontal(
         raise RuntimeError("The render pool produced no candidates.")
 
     enriched = False
+    # Auto-enrich on the evidence-poor tier ONLY — measured both ways: it
+    # rescued weak CCTV bases (young8 0.41→0.51), and enabling it on the rich
+    # tier was A/B'd on 2026-08-10 and REGRESSED the clean close-up (winner
+    # 0.601→0.580, oracle 0.658→0.607): replace-outright swaps a strong
+    # champion for a chain render. Do not widen this gate without re-measuring.
     do_enrich = opts.enrich if opts.enrich is not None else (ev.tier == "evidence-poor")
     if do_enrich and not mock and not champion.gated:
         champion, extra_cands, ledger = enrich_chain(

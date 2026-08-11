@@ -404,13 +404,20 @@ input[type=range]{width:100%;accent-color:var(--a1)}.a2 input[type=range]{accent
         <div class="reconBox">
           <div class="galHead">🪞 نصف وجه ← وجه كامل <span class="galCount">— النصف الذي ترفعه يعود كما هو بكسل ببكسل</span></div>
           <div class="reconRow">
-            <label class="filePick" style="margin:0">⬆ نصف صورة<input id="c2halffile" type="file" accept="image/*"></label>
+            <label class="filePick" style="margin:0" title="يمكن اختيار عدة صور لنفس الشخص دفعة واحدة — الأولى هي الأساس والبقية أدلة إضافية تُدمج في بصمة موحّدة أدق للهوية">⬆ نصف صورة (أو عدة صور)<input id="c2halffile" type="file" accept="image/*" multiple></label>
             <select id="c2halfSide" class="galSel">
               <option value="">الجهة: تلقائي</option>
               <option value="left">النصف الأيسر هو المتوفر</option>
               <option value="right">النصف الأيمن هو المتوفر</option>
               <option value="top">النصف العلوي هو المتوفر</option>
               <option value="bottom">النصف السفلي هو المتوفر</option>
+            </select>
+            <select id="c2halfN" class="galSel" title="للصور الجانبية (بروفايل): عدد الوجوه المرشحة التي تُولَّد ثم يُرتَّب أفضلها بالبصمة — أكثر = أدق لكن أبطأ وأغلى. عند اختيار أقل من 8 يُولَّد العدد المطلوب بالضبط؛ خيار 8 قد يضيف الخادم فوقه حتى 4 صور تحسين تلقائي للصور الضعيفة (كاميرات المراقبة). لا يؤثر على إكمال نصف الوجه الأمامي.">
+              <option value="8" selected>المرشحون: 8 — الأدق</option>
+              <option value="6">المرشحون: 6</option>
+              <option value="4">المرشحون: 4</option>
+              <option value="2">المرشحون: 2</option>
+              <option value="1">مرشح واحد — الأسرع</option>
             </select>
             <label class="mirrorChk" title="ارفع صورة كاملة، ويقصّها الخادم بنفسه ثم يقارن النتيجة بالأصل"><input type="checkbox" id="c2halfCut"> صورة كاملة — اقطعها واختبر</label>
             <button class="btn a2" id="c2half" style="padding:8px 14px" disabled>🪞 أكمل الوجه</button>
@@ -1564,6 +1571,7 @@ $("c2recon").onclick = async () => {
 
 /* ---- half face -> whole face, with the supplied half preserved pixel for pixel ---- */
 let halfImage = null;
+let halfExtras = [];
 
 /* Input-vs-result strip: the uploaded photo STAYS on screen next to whatever
    face is currently adopted, so the viewer always sees the source evidence. */
@@ -1586,8 +1594,9 @@ function startGenThink() {
   const txt = $("genThinkText");
   const step = () => {
     const s = (Date.now() - t0) / 1000;
+    const n = Math.min(8, Math.max(1, Number($("c2halfN")?.value) || 8));
     if (s < 6) txt.textContent = "جارٍ تحليل الصورة…";
-    else if (s < 160) txt.textContent = `جارٍ توليد المرشحين… ${Math.min(8, 1 + Math.floor((s - 6) / 18))} من 8`;
+    else if (s < 160) txt.textContent = `جارٍ توليد المرشحين… ${Math.min(n, 1 + Math.floor((s - 6) / 18))} من ${n}`;
     else txt.textContent = "جارٍ ترتيب النتائج بالبصمة…";
   };
   step();
@@ -1632,15 +1641,19 @@ function renderHalfCandidates(result) {
 }
 
 $("c2halffile").onchange = async event => {
-  const file = event.target.files?.[0]; if (!file) return; event.target.value = "";
+  const files = Array.from(event.target.files || []); if (!files.length) return; event.target.value = "";
   try {
-    halfImage = await fileToDataUrl(file);
+    halfImage = await fileToDataUrl(files[0]);
+    halfExtras = [];
+    for (const f of files.slice(1, 7)) halfExtras.push(await fileToDataUrl(f));
     if (mode !== "studio") setMode("studio");
     await orbShowImage(halfImage);
     $("c2half").disabled = false;
     $("c2halfCands").style.display = "none"; $("c2halfCands").innerHTML = "";
     hideHfCompare();
-    $("c2halfStatus").textContent = "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
+    $("c2halfStatus").textContent = halfExtras.length
+      ? `الصورة الأساسية + ${halfExtras.length} صور إضافية كأدلة هوية — تُدمج كلها في بصمة موحّدة أدق. اضغط «أكمل الوجه».`
+      : "الصورة جاهزة — اختر الجهة (أو اتركها تلقائي) ثم اضغط «أكمل الوجه».";
   } catch (_) { $("c2halfStatus").textContent = "تعذّر قراءة الصورة."; }
 };
 $("c2half").onclick = async () => {
@@ -1653,7 +1666,13 @@ $("c2half").onclick = async () => {
   startGenThink();
   try {
     const side = $("c2halfSide").value || null;
-    const body = {image: halfImage, gender: segVal("c2gender", "data-g") || null, model: engineModel || undefined};
+    const body = {
+      image: halfImage,
+      gender: segVal("c2gender", "data-g") || null,
+      model: engineModel || undefined,
+      candidates: Math.min(8, Math.max(1, Number($("c2halfN").value) || 8)),
+      extra_images: halfExtras,
+    };
     // The cut-and-test path needs to know which half to keep; auto has no meaning there.
     if ($("c2halfCut").checked) body.take = side || "left"; else body.side = side;
     const result = await api.post("/half_face", body);
@@ -1672,6 +1691,15 @@ $("c2half").onclick = async () => {
       if (sim != null) bits.push(`تشابه البصمة مع الصورة الجانبية ${(sim * 100).toFixed(1)}%`);
       const tried = (result.candidates || []).length;
       if (tried > 1) bits.push(`أفضل نتيجة من ${tried} مرشحين`);
+      const asked = Math.min(8, Math.max(1, Number($("c2halfN")?.value) || 8));
+      const dups = Number(result.duplicates_removed || 0);
+      if (tried > 0 && tried < asked) {
+        const reasons = dups > 0
+          ? `${dups} نسخ متطابقة${asked - tried > dups ? " والبقية رأس غير أمامي أو أكثر من وجه" : ""}`
+          : "رأس غير أمامي أو أكثر من وجه";
+        bits.push(`استُبعد ${asked - tried} تلقائياً (${reasons})`);
+      }
+      if (result.n_extra_photos > 0) bits.push(`بصمة مدمجة من ${result.n_extra_photos + 1} صور`);
       bits.push(`${result.render?.model || ""} · ${result.seconds}ث`);
       $("c2halfStatus").innerHTML =
         `<b style="color:var(--good)">✔ الصورة المرفوعة جانبية (بروفايل) — وُلِّد وجه أمامي كامل لنفس الشخص.</b>` +
